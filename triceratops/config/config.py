@@ -9,15 +9,13 @@ import math
 from dataclasses import dataclass
 from typing import ClassVar
 
-from astropy.constants import G as _G_const
-from astropy.constants import M_sun, R_earth, R_sun
-from astropy.constants import au as _au_const
+import astropy.constants as _const
 
-_Msun: float = M_sun.cgs.value
-_Rsun: float = R_sun.cgs.value
-_Rearth: float = R_earth.cgs.value
-_G: float = _G_const.cgs.value
-_au: float = _au_const.cgs.value
+_Msun: float = _const.M_sun.cgs.value  # type: ignore[attr-defined]
+_Rsun: float = _const.R_sun.cgs.value  # type: ignore[attr-defined]
+_Rearth: float = _const.R_earth.cgs.value  # type: ignore[attr-defined]
+_G: float = _const.G.cgs.value  # type: ignore[attr-defined]
+_au: float = _const.au.cgs.value  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)
