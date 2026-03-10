@@ -12,16 +12,28 @@ from triceratops.domain.value_objects import ContrastCurve
 
 
 def load_contrast_curve(path: Path, band: str = "unknown") -> ContrastCurve:
-    """Load a contrast curve from a two-column whitespace-delimited file.
+    """Load a contrast curve from a two-column file.
+
+    Both comma-delimited (``.csv``) and whitespace-delimited (``.dat`` / ``.txt``)
+    files are supported.  The delimiter is auto-detected: comma is tried first; if
+    that yields fewer than two columns the file is re-parsed with whitespace
+    splitting.  Lines starting with ``#`` are treated as comments and skipped.
 
     The file format is::
 
+        # optional comment header
         <separation_arcsec>  <delta_mag>
         ...
 
-    Separations must be in ascending order in the file.
+    or equivalently with commas::
+
+        <separation_arcsec>,<delta_mag>
+        ...
+
+    Separations must be in ascending order in the file (or they will be sorted).
 
     Replaces funcs.file_to_contrast_curve() (funcs.py:200-225).
+    Fixes TRICERATOPS-PLUS vendor bug: funcs.py:271 hardcodes delimiter=','.
 
     Args:
         path: Path to the contrast curve file.
@@ -36,7 +48,15 @@ def load_contrast_curve(path: Path, band: str = "unknown") -> ContrastCurve:
     """
     if not Path(path).exists():
         raise FileNotFoundError(f"Contrast curve file not found: {path}")
-    data = np.loadtxt(path, delimiter=",")
+    # Auto-detect delimiter: try comma first, fall back to whitespace.
+    try:
+        data = np.loadtxt(path, delimiter=",", comments="#")
+        if data.ndim == 1:
+            data = data.reshape(1, -1)
+        if data.shape[1] < 2:
+            raise ValueError("not enough columns")
+    except (ValueError, IndexError):
+        data = np.loadtxt(path, comments="#")
     if data.ndim == 1:
         data = data.reshape(1, -1)
     if data.shape[1] < 2:
