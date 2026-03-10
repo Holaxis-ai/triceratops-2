@@ -102,8 +102,6 @@ class ValidationPreparer:
         filt_lcs: list[str] | None = None,
         scenario_ids: list | None = None,
         molusc_file: str | None = None,
-        # molusc_file: local path — not yet materialised; deferred to Phase 4
-        # if remote execution requires embedded content rather than a path.
     ) -> PreparedValidationInputs:
         """Fetch catalog and population data, load artifacts, return prepared inputs.
 
@@ -136,8 +134,8 @@ class ValidationPreparer:
             scenario_ids: Optional list of ScenarioIDs that will be run.
                 Used to determine whether a TRILEGAL population fetch is
                 needed.  If None, the full default registry is assumed.
-            molusc_file: Local path to MOLUSC output file.
-                NOTE: bare path — not yet materialised; deferred to Phase 4.
+            molusc_file: Local path to MOLUSC output file.  Loaded into
+                a MoluscData object at prep time.
 
         Returns:
             PreparedValidationInputs ready for ValidationEngine.compute_prepared().
@@ -271,6 +269,12 @@ class ValidationPreparer:
                 for f, b in zip(external_lc_files, filt_lcs)  # type: ignore[arg-type]
             ]
 
+        # ---- 7. MOLUSC data loading ----
+        molusc_data = None
+        if molusc_file is not None:
+            from triceratops.io.molusc import load_molusc_file
+            molusc_data = load_molusc_file(Path(molusc_file))
+
         # ---- Metadata ----
         _metadata = PreparedValidationMetadata(
             prep_timestamp=datetime.now(tz=timezone.utc),
@@ -288,6 +292,6 @@ class ValidationPreparer:
             trilegal_population=trilegal_population,
             external_lcs=external_lcs,
             contrast_curve=contrast_curve,
-            molusc_file=molusc_file,
+            molusc_data=molusc_data,
             scenario_ids=scenario_ids,
         )

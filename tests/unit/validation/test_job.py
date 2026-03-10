@@ -141,7 +141,7 @@ class TestPreparedValidationInputsConstruction:
         assert pvi.trilegal_population is None
         assert pvi.external_lcs is None
         assert pvi.contrast_curve is None
-        assert pvi.molusc_file is None
+        assert pvi.molusc_data is None
 
     def test_with_contrast_curve(
         self, stellar_field: StellarField, lc: LightCurve, cfg: Config
@@ -162,19 +162,25 @@ class TestPreparedValidationInputsConstruction:
         )
         assert pvi.contrast_curve is cc
 
-    def test_with_molusc_file_path(
+    def test_with_molusc_data(
         self, stellar_field: StellarField, lc: LightCurve, cfg: Config
     ) -> None:
-        """molusc_file accepts a local path string (deferred to Phase 4 for materialisation)."""
+        """molusc_data accepts a MoluscData object."""
+        from triceratops.domain.molusc import MoluscData
+        md = MoluscData(
+            semi_major_axis_au=np.array([20.0, 30.0]),
+            eccentricity=np.array([0.1, 0.2]),
+            mass_ratio=np.array([0.5, 0.6]),
+        )
         pvi = PreparedValidationInputs(
             target_id=1,
             stellar_field=stellar_field,
             light_curve=lc,
             config=cfg,
             period_days=10.0,
-            molusc_file="/tmp/fake_molusc.csv",
+            molusc_data=md,
         )
-        assert pvi.molusc_file == "/tmp/fake_molusc.csv"
+        assert pvi.molusc_data is md
 
     def test_period_days_can_be_list(
         self, stellar_field: StellarField, lc: LightCurve, cfg: Config

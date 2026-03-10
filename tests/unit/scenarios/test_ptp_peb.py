@@ -238,16 +238,15 @@ def test_peb_external_lcs_are_accumulated(
 
 # --- MOLUSC loading tests ---
 
-def test_load_molusc_qs_pads_short_file(tmp_path):
-    """MOLUSC file with fewer rows than N gets padded with zeros."""
-    csv_path = tmp_path / "molusc.csv"
-    csv_path.write_text(
-        "semi-major axis(AU),eccentricity,mass ratio\n"
-        "100,0.1,0.5\n"
-        "200,0.2,0.3\n"
-        "50,0.3,0.4\n"  # a*(1-e) = 50*0.7 = 35 > 10, passes
+def test_load_molusc_qs_pads_short_data():
+    """MOLUSC data with fewer rows than N gets padded with zeros."""
+    from triceratops.domain.molusc import MoluscData
+    data = MoluscData(
+        semi_major_axis_au=np.array([100.0, 200.0, 50.0]),
+        eccentricity=np.array([0.1, 0.2, 0.3]),
+        mass_ratio=np.array([0.5, 0.3, 0.4]),
     )
-    qs = _load_molusc_qs(str(csv_path), 10, 1.0)
+    qs = _load_molusc_qs(data, 10, 1.0)
     assert len(qs) == 10
     # First 3 rows all pass filter (a*(1-e) > 10)
     assert qs[0] > 0
@@ -258,27 +257,27 @@ def test_load_molusc_qs_pads_short_file(tmp_path):
     assert qs[9] == 0.0
 
 
-def test_load_molusc_qs_truncates_long_file(tmp_path):
-    """MOLUSC file with more rows than N gets truncated."""
-    lines = ["semi-major axis(AU),eccentricity,mass ratio\n"]
-    for i in range(20):
-        lines.append(f"{100 + i},0.1,{0.3 + i * 0.01}\n")
-    csv_path = tmp_path / "molusc.csv"
-    csv_path.write_text("".join(lines))
-    qs = _load_molusc_qs(str(csv_path), 5, 1.0)
+def test_load_molusc_qs_truncates_long_data():
+    """MOLUSC data with more rows than N gets truncated."""
+    from triceratops.domain.molusc import MoluscData
+    data = MoluscData(
+        semi_major_axis_au=np.array([100 + i for i in range(20)], dtype=float),
+        eccentricity=np.full(20, 0.1),
+        mass_ratio=np.array([0.3 + i * 0.01 for i in range(20)]),
+    )
+    qs = _load_molusc_qs(data, 5, 1.0)
     assert len(qs) == 5
 
 
-def test_load_molusc_qs_wide_separation_filter(tmp_path):
+def test_load_molusc_qs_wide_separation_filter():
     """Only rows with a*(1-e) > 10 are kept."""
-    csv_path = tmp_path / "molusc.csv"
-    csv_path.write_text(
-        "semi-major axis(AU),eccentricity,mass ratio\n"
-        "5,0.1,0.5\n"       # a*(1-e) = 5*0.9 = 4.5 < 10, rejected
-        "100,0.1,0.3\n"     # a*(1-e) = 100*0.9 = 90 > 10, kept
-        "8,0.5,0.4\n"       # a*(1-e) = 8*0.5 = 4 < 10, rejected
+    from triceratops.domain.molusc import MoluscData
+    data = MoluscData(
+        semi_major_axis_au=np.array([5.0, 100.0, 8.0]),
+        eccentricity=np.array([0.1, 0.1, 0.5]),
+        mass_ratio=np.array([0.5, 0.3, 0.4]),
     )
-    qs = _load_molusc_qs(str(csv_path), 5, 1.0)
+    qs = _load_molusc_qs(data, 5, 1.0)
     assert len(qs) == 5
     # Only 1 row passes filter
     assert qs[0] == pytest.approx(0.3)
@@ -286,14 +285,15 @@ def test_load_molusc_qs_wide_separation_filter(tmp_path):
     assert qs[1] == 0.0
 
 
-def test_load_molusc_qs_minimum_mass_ratio(tmp_path):
+def test_load_molusc_qs_minimum_mass_ratio():
     """Mass ratios below 0.1/M_s are clamped."""
-    csv_path = tmp_path / "molusc.csv"
-    csv_path.write_text(
-        "semi-major axis(AU),eccentricity,mass ratio\n"
-        "100,0.1,0.01\n"   # 0.01 < 0.1/2.0 = 0.05, will be clamped
+    from triceratops.domain.molusc import MoluscData
+    data = MoluscData(
+        semi_major_axis_au=np.array([100.0]),
+        eccentricity=np.array([0.1]),
+        mass_ratio=np.array([0.01]),
     )
-    qs = _load_molusc_qs(str(csv_path), 3, 2.0)
+    qs = _load_molusc_qs(data, 3, 2.0)
     assert qs[0] == pytest.approx(0.05)
 
 
@@ -334,12 +334,17 @@ def test_compute_companion_properties_basic():
 
 
 def test_compute_companion_prior_with_molusc():
-    """When molusc_file is not None, prior is all zeros."""
+    """When molusc_data is not None, prior is all zeros."""
+    from triceratops.domain.molusc import MoluscData
     prior = _compute_companion_prior(
         masses_comp=np.array([0.5, 0.3]),
         fluxratios_comp=np.array([0.3, 0.15]),
         M_s=1.0, plx=10.0, n=2,
-        molusc_file="dummy.csv",
+        molusc_data=MoluscData(
+            semi_major_axis_au=np.array([20.0]),
+            eccentricity=np.array([0.0]),
+            mass_ratio=np.array([0.5]),
+        ),
         contrast_curve=None, filt="TESS", is_eb=False,
     )
     assert np.allclose(prior, 0.0)
@@ -361,7 +366,7 @@ def test_compute_companion_prior_no_contrast():
         masses_comp=masses,
         fluxratios_comp=fluxratios,
         M_s=1.0, plx=10.0, n=n,
-        molusc_file=None,
+        molusc_data=None,
         contrast_curve=None, filt="TESS", is_eb=False,
     )
     assert prior.shape == (n,)
@@ -392,7 +397,7 @@ def test_compute_companion_prior_with_contrast_curve():
         masses_comp=masses,
         fluxratios_comp=fluxratios,
         M_s=1.0, plx=10.0, n=n,
-        molusc_file=None,
+        molusc_data=None,
         contrast_curve=cc, filt="J", is_eb=True,
     )
     assert prior.shape == (n,)

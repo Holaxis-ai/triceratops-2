@@ -222,6 +222,13 @@ class ValidationWorkspace:
                     cache_path=cache,
                 )
 
+        # Load MOLUSC data if provided
+        molusc_data = None
+        if molusc_file is not None:
+            from pathlib import Path
+            from triceratops.io.molusc import load_molusc_file
+            molusc_data = load_molusc_file(Path(molusc_file))
+
         # All paths route through compute_prepared() so the field validation gate
         # and scenario_ids consistency guards always apply.
         # PreparedValidationInputs carries scenario_ids (job.py:78), so no separate
@@ -235,7 +242,7 @@ class ValidationWorkspace:
             trilegal_population=trilegal_population,
             external_lcs=external_lcs,
             contrast_curve=contrast_curve,
-            molusc_file=molusc_file,
+            molusc_data=molusc_data,
             scenario_ids=scenario_ids,
         )
         result = self._engine.compute_prepared(prepared)

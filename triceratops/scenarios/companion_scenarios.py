@@ -6,7 +6,7 @@ STP: Planet transiting a Sibling (companion-hosted) star.
 SEB: Eclipsing Binary on a Sibling (companion) star.
 
 All scenarios add companion star sampling via sample_companion_mass_ratio
-(or MOLUSC file), optional contrast curve prior, and flux dilution from
+(or pre-loaded MoluscData), optional contrast curve prior, and flux dilution from
 the unresolved companion.
 
 Source: marginal_likelihoods.py:674-913 (PTP), 916-1294 (PEB),
@@ -116,11 +116,11 @@ class PTPScenario(BaseScenario):
 
         Source: marginal_likelihoods.py:788-822.
         """
-        molusc_file = kwargs.get("molusc_file")
+        molusc_data = kwargs.get("molusc_data")
         M_s = stellar_params.mass_msun
 
-        if molusc_file is not None:
-            qs_comp = _load_molusc_qs(str(molusc_file), n, M_s)
+        if molusc_data is not None:
+            qs_comp = _load_molusc_qs(molusc_data, n, M_s)
         else:
             qs_comp = sample_companion_mass_ratio(np.random.rand(n), M_s)
 
@@ -357,13 +357,13 @@ class PTPScenario(BaseScenario):
         samples["P_orb"] = P_orb
 
         # Compute companion prior
-        molusc_file = kwargs.get("molusc_file")
+        molusc_data = kwargs.get("molusc_data")
         contrast_curve = kwargs.get("contrast_curve")
         filt = str(kwargs.get("filt", "TESS"))
         lnprior_comp = _compute_companion_prior(
             samples["masses_comp"], samples["fluxratios_comp"],
             stellar_params.mass_msun, stellar_params.parallax_mas, N,
-            molusc_file, contrast_curve, filt, is_eb=False,
+            molusc_data, contrast_curve, filt, is_eb=False,
         )
 
         geometry = self._compute_orbital_geometry(
@@ -431,7 +431,7 @@ class PEBScenario(BaseScenario):
 
         Source: marginal_likelihoods.py:1034-1071.
         """
-        molusc_file = kwargs.get("molusc_file")
+        molusc_data = kwargs.get("molusc_data")
         M_s = stellar_params.mass_msun
         R_s = stellar_params.radius_rsun
 
@@ -440,8 +440,8 @@ class PEBScenario(BaseScenario):
         eccs = sample_eccentricity(np.random.rand(n), planet=False, period=P_orb)
         argps = sample_arg_periastron(np.random.rand(n))
 
-        if molusc_file is not None:
-            qs_comp = _load_molusc_qs(str(molusc_file), n, M_s)
+        if molusc_data is not None:
+            qs_comp = _load_molusc_qs(molusc_data, n, M_s)
         else:
             qs_comp = sample_companion_mass_ratio(np.random.rand(n), M_s)
 
@@ -787,13 +787,13 @@ class PEBScenario(BaseScenario):
         samples["P_orb"] = P_orb
 
         # Compute companion prior
-        molusc_file = kwargs.get("molusc_file")
+        molusc_data = kwargs.get("molusc_data")
         contrast_curve = kwargs.get("contrast_curve")
         filt = str(kwargs.get("filt", "TESS"))
         lnprior_comp = _compute_companion_prior(
             samples["masses_comp"], samples["fluxratios_comp"],
             stellar_params.mass_msun, stellar_params.parallax_mas, N,
-            molusc_file, contrast_curve, filt, is_eb=True,
+            molusc_data, contrast_curve, filt, is_eb=True,
         )
 
         geometry = self._compute_orbital_geometry(
@@ -884,13 +884,13 @@ class STPScenario(BaseScenario):
         Source: marginal_likelihoods.py:1349-1512.
         Planet radius sampled with companion mass as host mass (line 1509).
         """
-        molusc_file = kwargs.get("molusc_file")
+        molusc_data = kwargs.get("molusc_data")
         M_s = stellar_params.mass_msun
         R_s = stellar_params.radius_rsun
         Teff = stellar_params.teff_k
 
-        if molusc_file is not None:
-            qs_comp = _load_molusc_qs(str(molusc_file), n, M_s)
+        if molusc_data is not None:
+            qs_comp = _load_molusc_qs(molusc_data, n, M_s)
         else:
             qs_comp = sample_companion_mass_ratio(np.random.rand(n), M_s)
 
@@ -1155,13 +1155,13 @@ class STPScenario(BaseScenario):
         samples["M_s"] = np.full(N, stellar_params.mass_msun)
         samples["P_orb"] = P_orb
 
-        molusc_file = kwargs.get("molusc_file")
+        molusc_data = kwargs.get("molusc_data")
         contrast_curve = kwargs.get("contrast_curve")
         filt = str(kwargs.get("filt", "TESS"))
         lnprior_comp = _compute_companion_prior(
             samples["masses_comp"], samples["fluxratios_comp"],
             stellar_params.mass_msun, stellar_params.parallax_mas, N,
-            molusc_file, contrast_curve, filt, is_eb=False,
+            molusc_data, contrast_curve, filt, is_eb=False,
         )
 
         geometry = self._compute_orbital_geometry(
@@ -1229,7 +1229,7 @@ class SEBScenario(BaseScenario):
         EB masses = qs * masses_comp (line 1736).
         EB radii/Teffs use companion as reference (line 1737).
         """
-        molusc_file = kwargs.get("molusc_file")
+        molusc_data = kwargs.get("molusc_data")
         M_s = stellar_params.mass_msun
         R_s = stellar_params.radius_rsun
         Teff = stellar_params.teff_k
@@ -1239,8 +1239,8 @@ class SEBScenario(BaseScenario):
         eccs = sample_eccentricity(np.random.rand(n), planet=False, period=P_orb)
         argps = sample_arg_periastron(np.random.rand(n))
 
-        if molusc_file is not None:
-            qs_comp = _load_molusc_qs(str(molusc_file), n, M_s)
+        if molusc_data is not None:
+            qs_comp = _load_molusc_qs(molusc_data, n, M_s)
         else:
             qs_comp = sample_companion_mass_ratio(np.random.rand(n), M_s)
 
@@ -1581,14 +1581,14 @@ class SEBScenario(BaseScenario):
         samples["P_orb"] = P_orb
 
         # SEB companion prior includes both EB and companion flux (lines 1819-1858)
-        molusc_file = kwargs.get("molusc_file")
+        molusc_data = kwargs.get("molusc_data")
         contrast_curve = kwargs.get("contrast_curve")
         filt = str(kwargs.get("filt", "TESS"))
         lnprior_comp = _compute_seb_companion_prior(
             samples["masses_comp"], samples["fluxratios_comp"],
             samples["masses_eb"], samples["fluxratios_eb"],
             stellar_params.mass_msun, stellar_params.parallax_mas, N,
-            molusc_file, contrast_curve, filt,
+            molusc_data, contrast_curve, filt,
         )
 
         geometry = self._compute_orbital_geometry(

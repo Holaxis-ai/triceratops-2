@@ -6,11 +6,10 @@ scenario classes that use them.
 """
 from __future__ import annotations
 
-import textwrap
-
 import numpy as np
 import pytest
 
+from triceratops.domain.molusc import MoluscData
 from triceratops.scenarios._companion_helpers import (
     _compute_companion_properties,
     _flux_ratio_in_band,
@@ -149,72 +148,53 @@ class TestComputeCompanionProperties:
 # ---------------------------------------------------------------------------
 
 class TestLoadMoluscQs:
-    """Tests for _load_molusc_qs(molusc_file, n, primary_mass)."""
+    """Tests for _load_molusc_qs(molusc_data, n, primary_mass)."""
 
-    _HEADER = "semi-major axis(AU),eccentricity,mass ratio"
+    @staticmethod
+    def _make_data(rows: list[tuple[float, float, float]]) -> MoluscData:
+        """Build a MoluscData from (a, e, q) tuples."""
+        a = np.array([r[0] for r in rows])
+        e = np.array([r[1] for r in rows])
+        q = np.array([r[2] for r in rows])
+        return MoluscData(semi_major_axis_au=a, eccentricity=e, mass_ratio=q)
 
-    def _write_csv(self, tmp_path, rows: list[tuple[float, float, float]]) -> str:
-        """Write a minimal MOLUSC CSV and return the path as a string."""
-        path = tmp_path / "molusc.csv"
-        lines = [self._HEADER]
-        for a, e, q in rows:
-            lines.append(f"{a},{e},{q}")
-        path.write_text("\n".join(lines))
-        return str(path)
-
-    def test_valid_file_returns_array_of_length_n(self, tmp_path) -> None:
-        """A valid MOLUSC file with enough wide rows returns an array of length n."""
-        # a*(1-e) must be > 10 AU to pass the filter
-        rows = [(20.0, 0.0, 0.4), (30.0, 0.1, 0.5), (50.0, 0.0, 0.6)]
-        path = self._write_csv(tmp_path, rows)
-        result = _load_molusc_qs(path, n=2, primary_mass=1.0)
+    def test_valid_data_returns_array_of_length_n(self) -> None:
+        """MoluscData with enough wide rows returns an array of length n."""
+        data = self._make_data([(20.0, 0.0, 0.4), (30.0, 0.1, 0.5), (50.0, 0.0, 0.6)])
+        result = _load_molusc_qs(data, n=2, primary_mass=1.0)
         assert result.shape == (2,)
 
-    def test_pads_with_zeros_when_shorter_than_n(self, tmp_path) -> None:
+    def test_pads_with_zeros_when_shorter_than_n(self) -> None:
         """When fewer rows survive filtering than n, result is padded with zeros."""
-        rows = [(20.0, 0.0, 0.4)]  # only one wide-separation row
-        path = self._write_csv(tmp_path, rows)
-        result = _load_molusc_qs(path, n=5, primary_mass=1.0)
+        data = self._make_data([(20.0, 0.0, 0.4)])
+        result = _load_molusc_qs(data, n=5, primary_mass=1.0)
         assert result.shape == (5,)
         assert result[1] == pytest.approx(0.0)
 
-    def test_truncates_when_longer_than_n(self, tmp_path) -> None:
+    def test_truncates_when_longer_than_n(self) -> None:
         """When more rows survive filtering than n, result is truncated to n."""
-        rows = [(a, 0.0, 0.5) for a in [20, 30, 40, 50, 60]]
-        path = self._write_csv(tmp_path, rows)
-        result = _load_molusc_qs(path, n=3, primary_mass=1.0)
+        data = self._make_data([(a, 0.0, 0.5) for a in [20, 30, 40, 50, 60]])
+        result = _load_molusc_qs(data, n=3, primary_mass=1.0)
         assert result.shape == (3,)
 
-    def test_filters_out_short_separation_rows(self, tmp_path) -> None:
+    def test_filters_out_short_separation_rows(self) -> None:
         """Rows where a*(1-e) <= 10 must be excluded."""
-        # Only the 50 AU row is wide enough; the 5 AU row is excluded.
-        rows = [(5.0, 0.0, 0.3), (50.0, 0.0, 0.7)]
-        path = self._write_csv(tmp_path, rows)
-        result = _load_molusc_qs(path, n=1, primary_mass=1.0)
+        data = self._make_data([(5.0, 0.0, 0.3), (50.0, 0.0, 0.7)])
+        result = _load_molusc_qs(data, n=1, primary_mass=1.0)
         assert result.shape == (1,)
         assert result[0] == pytest.approx(0.7)
 
-    def test_file_not_found_raises(self, tmp_path) -> None:
-        """A missing file must raise (FileNotFoundError or similar)."""
-        missing = str(tmp_path / "does_not_exist.csv")
-        with pytest.raises(Exception):
-            _load_molusc_qs(missing, n=5, primary_mass=1.0)
-
-    def test_minimum_mass_ratio_enforced(self, tmp_path) -> None:
+    def test_minimum_mass_ratio_enforced(self) -> None:
         """Rows with q < 0.1/primary_mass are clamped to 0.1/primary_mass."""
         primary_mass = 1.0
         min_q = 0.1 / primary_mass
-        # Set a very small mass ratio that should get clamped.
-        rows = [(20.0, 0.0, 0.001)]
-        path = self._write_csv(tmp_path, rows)
-        result = _load_molusc_qs(path, n=1, primary_mass=primary_mass)
+        data = self._make_data([(20.0, 0.0, 0.001)])
+        result = _load_molusc_qs(data, n=1, primary_mass=primary_mass)
         assert result[0] == pytest.approx(min_q)
 
-    def test_empty_file_after_filtering_pads_zeros(self, tmp_path) -> None:
+    def test_empty_data_after_filtering_pads_zeros(self) -> None:
         """When all rows are filtered out, result is all zeros of length n."""
-        # All rows have a*(1-e) = 2 <= 10, so none survive.
-        rows = [(2.0, 0.0, 0.5), (3.0, 0.0, 0.6)]
-        path = self._write_csv(tmp_path, rows)
-        result = _load_molusc_qs(path, n=4, primary_mass=1.0)
+        data = self._make_data([(2.0, 0.0, 0.5), (3.0, 0.0, 0.6)])
+        result = _load_molusc_qs(data, n=4, primary_mass=1.0)
         assert result.shape == (4,)
         np.testing.assert_array_equal(result, np.zeros(4))

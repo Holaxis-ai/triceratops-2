@@ -294,7 +294,7 @@ class TestValidationPreparerPrepare:
         )
         assert pvi.external_lcs is None
         assert pvi.contrast_curve is None
-        assert pvi.molusc_file is None
+        assert pvi.molusc_data is None
 
 
 # ---------------------------------------------------------------------------

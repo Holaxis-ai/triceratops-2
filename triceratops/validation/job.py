@@ -35,6 +35,7 @@ from collections.abc import Sequence
 if TYPE_CHECKING:
     from triceratops.config.config import Config
     from triceratops.domain.entities import ExternalLightCurve, LightCurve, StellarField
+    from triceratops.domain.molusc import MoluscData
     from triceratops.domain.scenario_id import ScenarioID
     from triceratops.domain.value_objects import ContrastCurve
     from triceratops.population.protocols import TRILEGALResult
@@ -69,12 +70,10 @@ class PreparedValidationInputs:
         Ground-based follow-up light curves.  None if not available.
     contrast_curve:
         AO/speckle contrast curve.  None if not available.
-    molusc_file:
-        Local filesystem path to a MOLUSC output file.
-        NOTE: This is a bare path string — not yet materialised content.
-        The compute boundary is not fully clean for this field until Phase 4,
-        when remote execution requires the content to be embedded rather than
-        referenced by path.  Deferred to Phase 4.
+    molusc_data:
+        Pre-loaded MOLUSC companion population data.  None if no MOLUSC
+        file was provided.  Loaded at prep time by ValidationPreparer or
+        ValidationWorkspace; no filesystem path crosses the compute boundary.
     scenario_ids:
         The scenario subset that was prepared for.  ``None`` means the full
         default registry.  ``compute_prepared()`` passes this directly to
@@ -90,7 +89,7 @@ class PreparedValidationInputs:
     trilegal_population: TRILEGALResult | None = None
     external_lcs: list[ExternalLightCurve] | None = None
     contrast_curve: ContrastCurve | None = None
-    molusc_file: str | None = None  # local path — not yet materialised; deferred to Phase 4
+    molusc_data: MoluscData | None = None
     scenario_ids: Sequence[ScenarioID] | None = None  # None → run full default registry
 
     def validate(self) -> None:

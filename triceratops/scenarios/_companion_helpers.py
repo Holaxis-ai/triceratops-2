@@ -1,7 +1,7 @@
 """Module-level helper functions for companion-star scenarios (PTP, PEB, STP, SEB).
 
 These helpers handle companion star photometry, SDSS magnitude handling,
-MOLUSC file loading, and flux ratio utilities that are shared across
+MOLUSC data processing, and flux ratio utilities that are shared across
 the four companion-star scenario classes.
 
 This module is intentionally separate from background scenario helpers
@@ -10,8 +10,8 @@ This module is intentionally separate from background scenario helpers
 from __future__ import annotations
 
 import numpy as np
-from pandas import read_csv
 
+from triceratops.domain.molusc import MoluscData
 from triceratops.priors.lnpriors import lnprior_bound_companion
 from triceratops.scenarios.constants import (
     COMPANION_DEFAULT_SEP_ARCSEC,
@@ -27,30 +27,25 @@ _ln2pi = LN2PI
 
 
 def _load_molusc_qs(
-    molusc_file: str,
+    molusc_data: MoluscData,
     n: int,
     primary_mass: float,
 ) -> np.ndarray:
-    """Load companion mass ratios from a MOLUSC output file.
-
-    Source: marginal_likelihoods.py:788-797 (PTP), 1040-1050 (PEB).
+    """Extract companion mass ratios from pre-loaded MOLUSC data.
 
     Filters: keeps only rows where a*(1-e) > 10 AU (wide-separation companions).
     Pads with zeros if shorter than n, or truncates if longer.
 
     Args:
-        molusc_file: Path to the MOLUSC CSV.
+        molusc_data: Pre-loaded MOLUSC data (three arrays).
         n: Desired output array length.
         primary_mass: Primary star mass in Msun.
 
     Returns:
         Array of mass ratios, shape (n,).
     """
-    df = read_csv(molusc_file)
-    molusc_a = np.asarray(df["semi-major axis(AU)"])
-    molusc_e = np.asarray(df["eccentricity"])
-    df2 = df[molusc_a * (1 - molusc_e) > 10]
-    qs = np.asarray(df2["mass ratio"]).copy()
+    mask = molusc_data.semi_major_axis_au * (1 - molusc_data.eccentricity) > 10
+    qs = molusc_data.mass_ratio[mask].copy()
     qs[qs < 0.1 / primary_mass] = 0.1 / primary_mass
     if len(qs) < n:
         qs = np.pad(qs, (0, n - len(qs)))
@@ -92,7 +87,7 @@ def _compute_companion_prior(
     M_s: float,
     plx: float,
     n: int,
-    molusc_file: object | None,
+    molusc_data: object | None,
     contrast_curve: object | None,
     filt: str,
     is_eb: bool,
@@ -104,7 +99,7 @@ def _compute_companion_prior(
     Returns:
         lnprior_companion array, shape (N,).
     """
-    if molusc_file is not None:
+    if molusc_data is not None:
         return np.zeros(n)
 
     if contrast_curve is None:
@@ -176,7 +171,7 @@ def _compute_seb_companion_prior(
     M_s: float,
     plx: float,
     n: int,
-    molusc_file: object | None,
+    molusc_data: object | None,
     contrast_curve: object | None,
     filt: str,
 ) -> np.ndarray:
@@ -185,7 +180,7 @@ def _compute_seb_companion_prior(
     Source: marginal_likelihoods.py:1819-1858.
     delta_mags includes BOTH companion and EB contributions.
     """
-    if molusc_file is not None:
+    if molusc_data is not None:
         return np.zeros(n)
 
     if contrast_curve is None:

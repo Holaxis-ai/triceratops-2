@@ -23,6 +23,7 @@ from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, St
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import ContrastCurve, StellarParameters
+from triceratops.domain.molusc import MoluscData
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.base import Scenario
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
@@ -50,7 +51,7 @@ class ScenarioExecutionContext:
     target_tmag: float | None = None
     external_lc_bands: tuple = ()
     filt: str | None = None
-    molusc_file: str | None = None
+    molusc_data: MoluscData | None = None
 
 
 def _worker_initializer() -> None:
@@ -86,7 +87,7 @@ def _scenario_worker(
     kwargs: dict = {
         "contrast_curve": ctx.contrast_curve,
         "filt": ctx.filt,
-        "molusc_file": ctx.molusc_file,
+        "molusc_data": ctx.molusc_data,
         "trilegal_population": ctx.trilegal_population,
         "host_magnitudes": ctx.host_magnitudes,
         "external_lc_bands": ctx.external_lc_bands,
@@ -135,8 +136,7 @@ class ValidationEngine:
         scenario_ids: Sequence[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
         contrast_curve: ContrastCurve | None = None,
-        trilegal_cache_path: str | None = None,
-        molusc_file: str | None = None,
+        molusc_data: MoluscData | None = None,
         trilegal_population: TRILEGALResult | None = None,
     ) -> ValidationResult:
         """Run all requested scenarios and aggregate into a ValidationResult.
@@ -151,14 +151,8 @@ class ValidationEngine:
                 scenarios when no non-target star has positive transit depth.
             external_lcs: Ground-based follow-up light curves.
             contrast_curve: AO/speckle contrast curve for companion prior.
-            trilegal_cache_path: Path to cached TRILEGAL CSV.  Used only if
-                ``trilegal_population`` is not already provided.  Deprecated:
-                callers should materialise the population via ValidationPreparer
-                or ValidationWorkspace and pass it directly.
-            trilegal_population: Pre-materialised TRILEGAL population.  When
-                provided, ``trilegal_cache_path`` and any injected
-                ``population_provider`` are ignored for this call.  This is the
-                preferred path for compute_prepared() and remote workers.
+            molusc_data: Pre-loaded MOLUSC companion population data.
+            trilegal_population: Pre-materialised TRILEGAL population.
 
         Returns:
             ValidationResult with FPP, NFPP, and per-scenario results.
@@ -202,7 +196,7 @@ class ValidationEngine:
         shared_kwargs: dict = {
             "contrast_curve": contrast_curve,
             "filt": filt,
-            "molusc_file": molusc_file,
+            "molusc_data": molusc_data,
             "trilegal_population": trilegal_population,
             "host_magnitudes": host_magnitudes,
             "external_lc_bands": tuple(
@@ -331,7 +325,7 @@ class ValidationEngine:
             external_lcs=prepared.external_lcs,
             contrast_curve=prepared.contrast_curve,
             trilegal_population=prepared.trilegal_population,
-            molusc_file=prepared.molusc_file,
+            molusc_data=prepared.molusc_data,
         )
 
     @staticmethod
