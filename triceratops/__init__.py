@@ -9,6 +9,12 @@ __version__ = "0.2.0.dev0"
 # from triceratops.config.config import Config, MissionConfig
 # from triceratops.domain.scenario_id import ScenarioID
 
+from triceratops._compat.target_shim import target
+
+Target = target
+
 __all__ = [
     "__version__",
+    "Target",
+    "target",
 ]

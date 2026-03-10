@@ -97,10 +97,9 @@ def _run_new_code(golden: dict) -> object:
 
         try:
             t.calc_probs(
-                time, flux, sigma, P_ORB,
-                n=n,
+                time, flux_0=flux, flux_err_0=sigma, P_orb=P_ORB,
+                N=n,
                 lnz_const=LNZ_CONST,
-                plot=False,
             )
         except ImportError as exc:
             pytest.skip(f"pytransit not available with current numpy: {exc}")
