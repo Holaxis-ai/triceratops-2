@@ -1,41 +1,25 @@
 """PSF flux ratio and transit depth computation.
 
-Replaces the dblquad(Gauss2D) logic in triceratops.calc_depths().
-Pure functions -- no network I/O, no file I/O.
+Replaces the dblquad(Gauss2D) logic in triceratops.calc_depths() with the
+exact analytic integral of a separable 2D Gaussian over a pixel box.
+
+The 2D Gaussian integral over a pixel box [x-0.5, x+0.5] × [y-0.5, y+0.5]
+centred at (mu_x, mu_y) with amplitude A and std sigma is:
+
+    A * [Φ((x+0.5-mu_x)/sigma) - Φ((x-0.5-mu_x)/sigma)]
+      * [Φ((y+0.5-mu_y)/sigma) - Φ((y-0.5-mu_y)/sigma)]
+
+where Φ = scipy.special.ndtr (the standard normal CDF).  This is
+mathematically exact — not an approximation — and replaces K×S×P calls to
+adaptive quadrature with a single vectorised ndtr computation.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from scipy.integrate import dblquad
+from scipy.special import ndtr
 
 from triceratops.domain.entities import StellarField
-
-
-def gauss2d(
-    y: float,
-    x: float,
-    x0: float,
-    y0: float,
-    sigma: float,
-    amplitude: float = 1.0,
-) -> float:
-    """2D circular Gaussian PSF evaluated at (x, y).
-
-    Source: funcs.Gauss2D and triceratops.py calc_depths().
-
-    Args:
-        y: Y-coordinate (first arg for dblquad compatibility).
-        x: X-coordinate.
-        x0, y0: Centre of the PSF.
-        sigma: Standard deviation of the Gaussian in pixels.
-        amplitude: Total integrated flux (area under PSF).
-
-    Returns:
-        PSF value at (x, y).
-    """
-    exponent = ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2)
-    return amplitude / (2 * np.pi * sigma ** 2) * np.exp(-exponent)
 
 
 def compute_flux_ratios(
@@ -46,7 +30,8 @@ def compute_flux_ratios(
 ) -> list[float]:
     """Compute the fraction of aperture flux contributed by each star.
 
-    Ports the PSF integration loop from triceratops.calc_depths() (lines 542-581).
+    Ports the PSF integration loop from triceratops.calc_depths() (lines 542-581)
+    using the analytic separable Gaussian CDF form instead of dblquad.
 
     Args:
         field: StellarField with all stars.
@@ -65,33 +50,31 @@ def compute_flux_ratios(
     # Relative brightness of each star normalised to brightest
     tmags = np.array([s.tmag for s in field.stars])
     min_tmag = np.min(tmags)
-    brightness = 10.0 ** ((min_tmag - tmags) / 2.5)
+    brightness = 10.0 ** ((min_tmag - tmags) / 2.5)  # shape (S,)
 
     flux_ratio_per_sector = np.zeros((n_sectors, n_stars))
 
     for k in range(n_sectors):
-        rel_flux = np.zeros(n_stars)
-        for i in range(n_stars):
-            mu_x = pixel_coords_per_sector[k][i, 0]
-            mu_y = pixel_coords_per_sector[k][i, 1]
-            a = brightness[i]
-            total = 0.0
-            for j in range(len(aperture_pixels_per_sector[k])):
-                px = aperture_pixels_per_sector[k][j]
-                total += dblquad(
-                    gauss2d,
-                    px[1] - 0.5,
-                    px[1] + 0.5,
-                    px[0] - 0.5,
-                    px[0] + 0.5,
-                    args=(mu_x, mu_y, sigma_psf_px, a),
-                )[0]
-            rel_flux[i] = total
-        total_flux = np.sum(rel_flux)
+        pix = aperture_pixels_per_sector[k]    # (P, 2): col, row
+        coords = pixel_coords_per_sector[k]    # (S, 2): col, row
+
+        px = pix[:, 0][:, None]                # (P, 1) col
+        py = pix[:, 1][:, None]                # (P, 1) row
+        mu_x = coords[:, 0][None, :]           # (1, S) col
+        mu_y = coords[:, 1][None, :]           # (1, S) row
+
+        # Analytic integral over each pixel box for each star: shape (P, S)
+        pixel_flux = (
+            brightness[None, :]
+            * (ndtr((px + 0.5 - mu_x) / sigma_psf_px) - ndtr((px - 0.5 - mu_x) / sigma_psf_px))
+            * (ndtr((py + 0.5 - mu_y) / sigma_psf_px) - ndtr((py - 0.5 - mu_y) / sigma_psf_px))
+        )
+
+        rel_flux = pixel_flux.sum(axis=0)      # (S,)
+        total_flux = float(rel_flux.sum())
         if total_flux > 0:
             flux_ratio_per_sector[k, :] = rel_flux / total_flux
 
-    # Average across sectors
     avg_ratios = np.mean(flux_ratio_per_sector, axis=0)
     return avg_ratios.tolist()
 
