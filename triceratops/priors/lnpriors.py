@@ -375,4 +375,4 @@ def lnprior_background(
     """
     seps = _separation_at_contrast(delta_mags, separations_arcsec, contrasts)
     with np.errstate(divide='ignore', invalid='ignore'):
-        return np.log((n_comp / 0.1) * (1 / 3600) ** 2 * seps**2)
+        return np.log10((n_comp / 0.1) * (1 / 3600) ** 2 * seps**2)
