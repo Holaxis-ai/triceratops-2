@@ -277,13 +277,26 @@ def _lookup_background_ldc_bulk(
     teffs: np.ndarray,
     loggs: np.ndarray,
     metallicities: np.ndarray,
+    cache: dict | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Match the original bright-background LDC lookup order exactly."""
+    """Match the original bright-background LDC lookup order exactly.
+
+    The optional ``cache`` dict is keyed by ``band``.  Pass
+    ``samples.get("_ldc_cache")`` at each call site so that repeated calls
+    within one scenario.compute() (e.g. _evaluate_lnL then _pack_result) skip
+    the Python loop entirely after the first call.
+    """
+    if cache is not None and band in cache:
+        return cache[band]
+
     load_filter = getattr(ldc_catalog, "_load_filter", None)
     if not callable(load_filter):
-        return ldc_catalog.get_coefficients_bulk(  # type: ignore[union-attr]
+        result = ldc_catalog.get_coefficients_bulk(  # type: ignore[union-attr]
             band, teffs, loggs, metallicities,
         )
+        if cache is not None:
+            cache[band] = result
+        return result
 
     zs, teff_grid, logg_grid, u1_grid, u2_grid = load_filter(band)
     n = len(teffs)
@@ -298,7 +311,10 @@ def _lookup_background_ldc_bulk(
         coeff_mask = mask & (zs == this_z)
         u1_out[i] = float(u1_grid[coeff_mask][0])
         u2_out[i] = float(u2_grid[coeff_mask][0])
-    return u1_out, u2_out
+    result = u1_out, u2_out
+    if cache is not None:
+        cache[band] = result
+    return result
 
 
 class DTPScenario(BaseScenario):
@@ -1053,6 +1069,7 @@ class BTPScenario(BaseScenario):
             "Teffs_comp": population.teffs,
             "Zs_comp": population.metallicities,
             "delta_mags_map": delta_mags_map,  # type: ignore[dict-item]
+            "_ldc_cache": {},
         }
 
     def _compute_orbital_geometry(
@@ -1103,6 +1120,7 @@ class BTPScenario(BaseScenario):
         # Per-TRILEGAL-star LDC (bulk lookup for all background stars)
         u1s_comp, u2s_comp = _lookup_background_ldc_bulk(
             self._ldc, config.mission, Teffs_comp, loggs_comp, Zs_comp,
+            cache=samples.get("_ldc_cache"),  # type: ignore[arg-type]
         )
 
         # Extra mask: logg >= 3.5 and Teff <= 10000
@@ -1146,6 +1164,7 @@ class BTPScenario(BaseScenario):
             # Per-TRILEGAL-star LDC for this band
             ext_u1s, ext_u2s = _lookup_background_ldc_bulk(
                 self._ldc, ext_lc.band, Teffs_comp, loggs_comp, Zs_comp,
+                cache=samples.get("_ldc_cache"),  # type: ignore[arg-type]
             )
 
             delta_mags_map = samples["delta_mags_map"]
@@ -1205,6 +1224,7 @@ class BTPScenario(BaseScenario):
 
         u1s_comp, u2s_comp = _lookup_background_ldc_bulk(
             self._ldc, "TESS", Teffs_comp, loggs_comp, Zs_comp,
+            cache=samples.get("_ldc_cache"),  # type: ignore[arg-type]
         )
 
         ext_u1: list[np.ndarray] = []
@@ -1215,6 +1235,7 @@ class BTPScenario(BaseScenario):
                 continue
             ext_u1s_all, ext_u2s_all = _lookup_background_ldc_bulk(
                 self._ldc, ext_lc.band, Teffs_comp, loggs_comp, Zs_comp,
+                cache=samples.get("_ldc_cache"),  # type: ignore[arg-type]
             )
             ext_u1.append(ext_u1s_all[idxs[idx]])
             ext_u2.append(ext_u2s_all[idxs[idx]])
@@ -1401,6 +1422,7 @@ class BEBScenario(BaseScenario):
             "Zs_comp": population.metallicities,
             "delta_mags_map": delta_mags_map,  # type: ignore[dict-item]
             "distance_correction": distance_correction,
+            "_ldc_cache": {},
         }
 
     def _beb_compute_eb_properties(
@@ -1521,6 +1543,7 @@ class BEBScenario(BaseScenario):
         # Per-TRILEGAL-star LDC
         u1s_comp, u2s_comp = _lookup_background_ldc_bulk(
             self._ldc, config.mission, Teffs_comp, loggs_comp, Zs_comp,
+            cache=samples.get("_ldc_cache"),  # type: ignore[arg-type]
         )
 
         comp_fr = fluxratios_comp[idxs]
@@ -1614,6 +1637,7 @@ class BEBScenario(BaseScenario):
             elc = ext_lc.light_curve
             ext_u1s, ext_u2s = _lookup_background_ldc_bulk(
                 self._ldc, ext_lc.band, Teffs_comp, loggs_comp, Zs_comp,
+                cache=samples.get("_ldc_cache"),  # type: ignore[arg-type]
             )
             ext_fr_eb = self._distance_corrected_fluxratios(
                 samples, ext_lc.band,
@@ -1709,6 +1733,7 @@ class BEBScenario(BaseScenario):
 
         u1s_comp, u2s_comp = _lookup_background_ldc_bulk(
             self._ldc, "TESS", Teffs_comp, loggs_comp, Zs_comp,
+            cache=samples.get("_ldc_cache"),  # type: ignore[arg-type]
         )
 
         ext_u1: list[np.ndarray] = []
@@ -1720,6 +1745,7 @@ class BEBScenario(BaseScenario):
                 continue
             ext_u1s_all, ext_u2s_all = _lookup_background_ldc_bulk(
                 self._ldc, ext_lc.band, Teffs_comp, loggs_comp, Zs_comp,
+                cache=samples.get("_ldc_cache"),  # type: ignore[arg-type]
             )
             ext_u1.append(ext_u1s_all[idxs[idx]])
             ext_u2.append(ext_u2s_all[idxs[idx]])
