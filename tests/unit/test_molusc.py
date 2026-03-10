@@ -143,6 +143,24 @@ class TestMoluscDataDtypeValidation:
                 mass_ratio=np.array([0.5, 0.6]),
             )
 
+    def test_nan_in_array_raises(self) -> None:
+        """Directly constructed MoluscData with NaN must be rejected."""
+        with pytest.raises(ValueError, match="non-finite"):
+            MoluscData(
+                semi_major_axis_au=np.array([float("nan"), 20.0]),
+                eccentricity=np.array([0.0, 0.1]),
+                mass_ratio=np.array([0.5, 0.6]),
+            )
+
+    def test_inf_in_array_raises(self) -> None:
+        """Directly constructed MoluscData with inf must be rejected."""
+        with pytest.raises(ValueError, match="non-finite"):
+            MoluscData(
+                semi_major_axis_au=np.array([20.0, 30.0]),
+                eccentricity=np.array([float("inf"), 0.1]),
+                mass_ratio=np.array([0.5, 0.6]),
+            )
+
 
 # ---------------------------------------------------------------------------
 # CWD independence with molusc_data

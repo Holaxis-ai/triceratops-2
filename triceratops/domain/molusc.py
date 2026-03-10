@@ -32,6 +32,10 @@ class MoluscData:
                     f"MoluscData.{name} must be a floating-point array, "
                     f"got dtype={arr.dtype!r}."
                 )
+            if not np.all(np.isfinite(arr)):
+                raise ValueError(
+                    f"MoluscData.{name} contains non-finite values (NaN or inf)."
+                )
         la, le, lm = len(self.semi_major_axis_au), len(self.eccentricity), len(self.mass_ratio)
         if not (la == le == lm):
             raise ValueError(
