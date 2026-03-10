@@ -63,10 +63,25 @@ def _build_test_registry():
     return build_default_registry(ldc_catalog=FixedLDCCatalog())
 
 
-def _run_new_code(golden: dict) -> object:
-    """Run the new compat shim on TOI-4155 stub data."""
+def _probs_df(result):
+    """Build scenario DataFrame from ValidationResult."""
+    import pandas as pd
+    return pd.DataFrame([
+        {
+            "scenario": r.scenario_id.value,
+            "prob": r.relative_probability,
+            "lnZ": r.ln_evidence,
+        }
+        for r in result.scenario_results
+    ])
+
+
+def _run_new_code(golden: dict):
+    """Run ValidationWorkspace on TOI-4155 stub data."""
     from tests.fixtures.stubs import StubPopulationSynthesisProvider, StubStarCatalogProvider
-    from triceratops._compat.target_shim import target
+    from triceratops.config.config import Config
+    from triceratops.domain.entities import LightCurve
+    from triceratops.validation.workspace import ValidationWorkspace
 
     seed = golden.get("seed", SEED)
     n = golden.get("n_mc_samples", N_MC)
@@ -83,27 +98,36 @@ def _run_new_code(golden: dict) -> object:
     test_registry = _build_test_registry()
 
     with patch("triceratops.validation.engine.DEFAULT_REGISTRY", test_registry):
-        t = target(
-            TIC_ID,
-            SECTORS,
-            _catalog_provider=stub_catalog,
-            _population_provider=stub_population,  # type: ignore[arg-type]
+        ws = ValidationWorkspace(
+            tic_id=TIC_ID,
+            sectors=SECTORS,
+            catalog_provider=stub_catalog,
+            population_provider=stub_population,
         )
         # Set flux ratios manually since stubs don't provide aperture pixels
-        t._workspace.stars[0].flux_ratio = 0.99
-        t._workspace.stars[0].transit_depth_required = TRANSIT_DEPTH / 0.99
-        t._workspace.stars[1].flux_ratio = 0.01
-        t._workspace.stars[1].transit_depth_required = 0.0
+        ws.stars[0].flux_ratio = 0.99
+        ws.stars[0].transit_depth_required = TRANSIT_DEPTH / 0.99
+        ws.stars[1].flux_ratio = 0.01
+        ws.stars[1].transit_depth_required = 0.0
+
+        ws.config = Config(
+            n_mc_samples=n,
+            lnz_const=LNZ_CONST,
+            parallel=False,
+            mission="TESS",
+        )
+
+        lc = LightCurve(
+            time_days=time,
+            flux=flux,
+            flux_err=sigma,
+        )
 
         try:
-            t.calc_probs(
-                time, flux_0=flux, flux_err_0=sigma, P_orb=P_ORB,
-                N=n,
-                lnz_const=LNZ_CONST,
-            )
+            ws.compute_probs(light_curve=lc, period_days=P_ORB)
         except ImportError as exc:
             pytest.skip(f"pytransit not available with current numpy: {exc}")
-    return t
+    return ws
 
 
 @pytest.fixture(scope="module")
@@ -114,14 +138,14 @@ def golden_toi4155() -> dict:
 
 
 @pytest.fixture(scope="module")
-def new_toi4155_result(golden_toi4155: dict) -> object:
+def new_toi4155_result(golden_toi4155: dict):
     return _run_new_code(golden_toi4155)
 
 
 @pytest.mark.golden
-def test_fpp_within_tolerance(new_toi4155_result: object, golden_toi4155: dict) -> None:
+def test_fpp_within_tolerance(new_toi4155_result, golden_toi4155: dict) -> None:
     """FPP matches golden value within atol=1e-4."""
-    new_fpp = new_toi4155_result.FPP  # type: ignore[attr-defined]
+    new_fpp = new_toi4155_result.fpp
     golden_fpp = golden_toi4155["FPP"]
     assert abs(new_fpp - golden_fpp) <= FPP_ATOL, (
         f"FPP mismatch: new={new_fpp:.6f}, golden={golden_fpp:.6f}, "
@@ -130,9 +154,9 @@ def test_fpp_within_tolerance(new_toi4155_result: object, golden_toi4155: dict) 
 
 
 @pytest.mark.golden
-def test_nfpp_within_tolerance(new_toi4155_result: object, golden_toi4155: dict) -> None:
+def test_nfpp_within_tolerance(new_toi4155_result, golden_toi4155: dict) -> None:
     """NFPP matches golden value within atol=1e-4."""
-    new_nfpp = new_toi4155_result.NFPP  # type: ignore[attr-defined]
+    new_nfpp = new_toi4155_result.nfpp
     golden_nfpp = golden_toi4155["NFPP"]
     assert abs(new_nfpp - golden_nfpp) <= FPP_ATOL, (
         f"NFPP mismatch: new={new_nfpp:.6f}, golden={golden_nfpp:.6f}"
@@ -140,9 +164,9 @@ def test_nfpp_within_tolerance(new_toi4155_result: object, golden_toi4155: dict)
 
 
 @pytest.mark.golden
-def test_probs_sum_to_one(new_toi4155_result: object) -> None:
+def test_probs_sum_to_one(new_toi4155_result) -> None:
     """Relative probabilities sum to 1.0."""
-    probs_df = new_toi4155_result.probs  # type: ignore[attr-defined]
+    probs_df = _probs_df(new_toi4155_result.results)
     total = probs_df["prob"].sum()
     assert abs(total - 1.0) < 1e-10 or total == 0.0, (
         f"Probabilities sum to {total}, expected 1.0"
@@ -152,13 +176,13 @@ def test_probs_sum_to_one(new_toi4155_result: object) -> None:
 @pytest.mark.golden
 @pytest.mark.parametrize("scenario_id", ALL_SCENARIO_IDS)
 def test_lnZ_within_rtol(
-    new_toi4155_result: object, golden_toi4155: dict, scenario_id: str
+    new_toi4155_result, golden_toi4155: dict, scenario_id: str
 ) -> None:
     """lnZ for each scenario matches golden value within rtol=1%."""
     if scenario_id not in golden_toi4155:
         pytest.skip(f"Scenario {scenario_id} not in golden values")
 
-    probs_df = new_toi4155_result.probs  # type: ignore[attr-defined]
+    probs_df = _probs_df(new_toi4155_result.results)
     new_row = probs_df[probs_df["scenario"] == scenario_id]
     if new_row.empty:
         pytest.skip(f"Scenario {scenario_id} not in new result")
@@ -179,13 +203,13 @@ def test_lnZ_within_rtol(
 @pytest.mark.golden
 @pytest.mark.parametrize("scenario_id", ALL_SCENARIO_IDS)
 def test_prob_within_rtol(
-    new_toi4155_result: object, golden_toi4155: dict, scenario_id: str
+    new_toi4155_result, golden_toi4155: dict, scenario_id: str
 ) -> None:
     """Relative probability for each scenario matches golden value."""
     if scenario_id not in golden_toi4155:
         pytest.skip(f"Scenario {scenario_id} not in golden values")
 
-    probs_df = new_toi4155_result.probs  # type: ignore[attr-defined]
+    probs_df = _probs_df(new_toi4155_result.results)
     new_row = probs_df[probs_df["scenario"] == scenario_id]
     if new_row.empty:
         pytest.skip(f"Scenario {scenario_id} not in new result")
