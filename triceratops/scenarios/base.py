@@ -40,7 +40,7 @@ class Scenario(Protocol):
         self,
         light_curve: LightCurve,
         stellar_params: StellarParameters,
-        period_days: float | list[float],
+        period_days: float | list[float] | tuple[float, float],
         config: Config,
         external_lcs: list[ExternalLightCurve] | None = None,
         **kwargs: object,
@@ -96,7 +96,7 @@ class BaseScenario(ABC):
         self,
         light_curve: LightCurve,
         stellar_params: StellarParameters,
-        period_days: float | list[float],
+        period_days: float | list[float] | tuple[float, float],
         config: Config,
         external_lcs: list[ExternalLightCurve] | None = None,
         **kwargs: object,
@@ -279,7 +279,7 @@ class BaseScenario(ABC):
 
     @staticmethod
     def _sample_period(
-        period_spec: float | list[float],
+        period_spec: float | list[float] | tuple[float, float],
         n: int,
     ) -> np.ndarray:
         """Delegate to scenarios.kernels.resolve_period()."""

@@ -88,7 +88,7 @@ class ValidationPreparer:
         sectors: np.ndarray,
         light_curve: LightCurve,
         config: Config,
-        period_days: float | list[float],
+        period_days: float | list[float] | tuple[float, float],
         mission: str = "TESS",
         search_radius: int = 10,
         transit_depth: float | None = None,
