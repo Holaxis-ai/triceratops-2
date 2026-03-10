@@ -93,6 +93,7 @@ class ValidationPreparer:
         contrast_curve_band: str = "TESS",
         external_lc_files: list[str] | None = None,
         filt_lcs: list[str] | None = None,
+        scenario_ids: list | None = None,
         molusc_file: str | None = None,
         # molusc_file: local path — not yet materialised; deferred to Phase 4
         # if remote execution requires embedded content rather than a path.
@@ -121,6 +122,11 @@ class ValidationPreparer:
             contrast_curve_band: Filter band label for the contrast curve.
             external_lc_files: Optional list of paths to external LC files.
             filt_lcs: Filter band labels for external_lc_files (same length).
+                Must be provided together with external_lc_files; raises if
+                one is non-empty and the other is empty or None.
+            scenario_ids: Optional list of ScenarioIDs that will be run.
+                Used to determine whether a TRILEGAL population fetch is
+                needed.  If None, the full default registry is assumed.
             molusc_file: Local path to MOLUSC output file.
                 NOTE: bare path — not yet materialised; deferred to Phase 4.
 
@@ -167,9 +173,16 @@ class ValidationPreparer:
         if self._population is not None:
             from triceratops.domain.scenario_id import ScenarioID
             from triceratops.scenarios.registry import DEFAULT_REGISTRY
+            if scenario_ids is not None:
+                eligible = [
+                    s for sid in scenario_ids
+                    if (s := DEFAULT_REGISTRY.get_or_none(sid)) is not None
+                ]
+            else:
+                eligible = DEFAULT_REGISTRY.all_scenarios()
             needs_trilegal = any(
                 s.scenario_id in ScenarioID.trilegal_scenarios()
-                for s in DEFAULT_REGISTRY.all_scenarios()
+                for s in eligible
             )
             if needs_trilegal:
                 cache = Path(trilegal_cache_path) if trilegal_cache_path else None
@@ -192,16 +205,23 @@ class ValidationPreparer:
 
         # ---- 5. External light curves loading ----
         external_lcs: list[ExternalLightCurve] | None = None
-        if external_lc_files and filt_lcs:
-            if len(external_lc_files) != len(filt_lcs):
+        _have_files = bool(external_lc_files)
+        _have_filts = bool(filt_lcs)
+        if _have_files or _have_filts:
+            if not (_have_files and _have_filts):
+                raise ValueError(
+                    "external_lc_files and filt_lcs must both be provided together; "
+                    f"got external_lc_files={external_lc_files!r} and filt_lcs={filt_lcs!r}."
+                )
+            if len(external_lc_files) != len(filt_lcs):  # type: ignore[arg-type]
                 raise ValueError(
                     f"external_lc_files and filt_lcs must have the same length, "
-                    f"got {len(external_lc_files)} files and {len(filt_lcs)} filters."
+                    f"got {len(external_lc_files)} files and {len(filt_lcs)} filters."  # type: ignore[arg-type]
                 )
             from triceratops.io.external_lc import load_external_lc_as_object
             external_lcs = [
                 load_external_lc_as_object(Path(f), b)
-                for f, b in zip(external_lc_files, filt_lcs)
+                for f, b in zip(external_lc_files, filt_lcs)  # type: ignore[arg-type]
             ]
 
         # ---- Metadata ----

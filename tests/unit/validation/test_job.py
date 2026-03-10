@@ -473,3 +473,160 @@ class TestPreparerExternalLcLengthGuard:
             )
         msg = str(exc_info.value)
         assert "1" in msg and "3" in msg
+
+
+class TestPreparerExternalLcAsymmetricGuard:
+    """Preparer must raise when one of external_lc_files / filt_lcs is empty/None
+    while the other is non-empty — the original `if x and y:` guard skipped these."""
+
+    def _make_preparer(self) -> object:
+        from unittest.mock import MagicMock
+        from triceratops.domain.value_objects import StellarParameters
+        from triceratops.validation.preparer import ValidationPreparer
+
+        star = Star(
+            tic_id=1234,
+            ra_deg=10.0, dec_deg=5.0,
+            tmag=12.0, jmag=11.5, hmag=11.3, kmag=11.2,
+            bmag=12.5, vmag=12.2,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5500.0,
+                logg=4.4, metallicity_dex=0.0, parallax_mas=10.0,
+            ),
+            flux_ratio=1.0,
+            transit_depth_required=0.01,
+        )
+        sf = StellarField(target_id=1234, mission="TESS", search_radius_pixels=10, stars=[star])
+        mock_catalog = MagicMock()
+        mock_catalog.query_nearby_stars.return_value = sf
+        return ValidationPreparer(catalog_provider=mock_catalog)
+
+    def _call_prepare(self, preparer, lc, cfg, **kwargs):
+        import numpy as np
+        return preparer.prepare(
+            target_id=1234,
+            sectors=np.array([1]),
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            **kwargs,
+        )
+
+    def test_files_provided_filters_none_raises(self, lc: LightCurve, cfg: Config) -> None:
+        """Files non-empty, filt_lcs=None → should raise, not silently drop files."""
+        preparer = self._make_preparer()
+        with pytest.raises(ValueError, match="both be provided together"):
+            self._call_prepare(preparer, lc, cfg,
+                               external_lc_files=["a.txt"], filt_lcs=None)
+
+    def test_files_provided_filters_empty_raises(self, lc: LightCurve, cfg: Config) -> None:
+        """Files non-empty, filt_lcs=[] → should raise, not silently drop files."""
+        preparer = self._make_preparer()
+        with pytest.raises(ValueError, match="both be provided together"):
+            self._call_prepare(preparer, lc, cfg,
+                               external_lc_files=["a.txt"], filt_lcs=[])
+
+    def test_filters_provided_files_none_raises(self, lc: LightCurve, cfg: Config) -> None:
+        """filt_lcs non-empty, files=None → should raise, not silently drop filters."""
+        preparer = self._make_preparer()
+        with pytest.raises(ValueError, match="both be provided together"):
+            self._call_prepare(preparer, lc, cfg,
+                               external_lc_files=None, filt_lcs=["J"])
+
+
+class TestPreparerTrilegalScenarioGate:
+    """TRILEGAL fetch should be skipped when scenario_ids excludes all TRILEGAL scenarios."""
+
+    def _make_preparer_with_population(self):
+        from unittest.mock import MagicMock
+        from triceratops.domain.value_objects import StellarParameters
+        from triceratops.validation.preparer import ValidationPreparer
+
+        star = Star(
+            tic_id=9999,
+            ra_deg=20.0, dec_deg=-10.0,
+            tmag=11.0, jmag=10.5, hmag=10.3, kmag=10.2,
+            bmag=11.5, vmag=11.2,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5800.0,
+                logg=4.4, metallicity_dex=0.0, parallax_mas=8.0,
+            ),
+            flux_ratio=1.0,
+            transit_depth_required=0.01,
+        )
+        sf = StellarField(target_id=9999, mission="TESS", search_radius_pixels=10, stars=[star])
+        mock_catalog = MagicMock()
+        mock_catalog.query_nearby_stars.return_value = sf
+        mock_pop = MagicMock()
+        mock_pop.query.return_value = MagicMock()
+        preparer = ValidationPreparer(
+            catalog_provider=mock_catalog,
+            population_provider=mock_pop,
+        )
+        return preparer, mock_pop
+
+    def test_trilegal_not_fetched_when_all_scenarios_non_trilegal(
+        self, lc: LightCurve, cfg: Config
+    ) -> None:
+        """When scenario_ids contains only non-TRILEGAL scenarios, provider.query() must not be called."""
+        import numpy as np
+        from triceratops.domain.scenario_id import ScenarioID
+        from triceratops.scenarios.registry import DEFAULT_REGISTRY
+
+        preparer, mock_pop = self._make_preparer_with_population()
+        trilegal_ids = ScenarioID.trilegal_scenarios()
+        non_trilegal_ids = [
+            sid for sid in DEFAULT_REGISTRY
+            if sid not in trilegal_ids
+        ]
+        preparer.prepare(
+            target_id=9999,
+            sectors=np.array([1]),
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            scenario_ids=non_trilegal_ids,
+        )
+        mock_pop.query.assert_not_called()
+
+    def test_trilegal_fetched_when_trilegal_scenario_included(
+        self, lc: LightCurve, cfg: Config
+    ) -> None:
+        """When scenario_ids includes a registered TRILEGAL scenario, provider.query() must be called."""
+        import numpy as np
+        from triceratops.domain.scenario_id import ScenarioID
+        from triceratops.scenarios.registry import DEFAULT_REGISTRY
+
+        preparer, mock_pop = self._make_preparer_with_population()
+        # Use only TRILEGAL IDs that are actually registered (BTP, BEB)
+        registered_trilegal_ids = [
+            sid for sid in ScenarioID.trilegal_scenarios()
+            if sid in DEFAULT_REGISTRY
+        ]
+        assert registered_trilegal_ids, "Need at least one registered TRILEGAL scenario for this test"
+        preparer.prepare(
+            target_id=9999,
+            sectors=np.array([1]),
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            scenario_ids=registered_trilegal_ids,
+        )
+        mock_pop.query.assert_called_once()
+
+    def test_trilegal_always_fetched_when_scenario_ids_none(
+        self, lc: LightCurve, cfg: Config
+    ) -> None:
+        """When scenario_ids=None (default), TRILEGAL is fetched (default registry has BTP/BEB)."""
+        import numpy as np
+
+        preparer, mock_pop = self._make_preparer_with_population()
+        preparer.prepare(
+            target_id=9999,
+            sectors=np.array([1]),
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            scenario_ids=None,
+        )
+        mock_pop.query.assert_called_once()
