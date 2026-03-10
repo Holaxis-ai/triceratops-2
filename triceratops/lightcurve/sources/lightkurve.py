@@ -109,11 +109,7 @@ class LightkurveSource:
             )
 
         # Step 5: Phase fold
-        epoch = astropy.time.Time(
-            ephemeris.t0_btjd + 2_457_000.0,
-            format="jd",
-            scale="tdb",
-        )
+        epoch = astropy.time.Time(ephemeris.t0_btjd, format="btjd", scale="tdb")
         lc_folded = lc.fold(period=ephemeris.period_days, epoch_time=epoch)
 
         # Step 6: Trim to transit window

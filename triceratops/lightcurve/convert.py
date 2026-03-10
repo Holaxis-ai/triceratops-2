@@ -31,7 +31,8 @@ def convert_folded_to_domain(
     the type conversion step. Bypasses all acquisition and transformation.
     The input must already be phase-folded with transit at phase=0.
 
-    IMPORTANT: uses .phase.value (TimeDelta in days), NOT .time.value (BTJD).
+    IMPORTANT: uses .phase.value (TimeDelta in days). On FoldedLightCurve,
+    .phase is an alias for .time — both hold phase, not the original BTJD.
     """
     config = config or LightCurveConfig()
 
