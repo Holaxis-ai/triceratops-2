@@ -567,3 +567,310 @@ class TestEngineCompute:
         )
 
         assert fake_ntp.seen_light_curve is transit_lc
+
+
+# ---------------------------------------------------------------------------
+# _renorm_light_curve_for_host edge cases
+# ---------------------------------------------------------------------------
+
+class TestRenormLightCurveForHost:
+    """Tests for ValidationEngine._renorm_light_curve_for_host()."""
+
+    _renorm = staticmethod(ValidationEngine._renorm_light_curve_for_host)
+
+    @pytest.fixture()
+    def lc(self):
+        time = np.linspace(-0.1, 0.1, 50)
+        flux = np.ones(50)
+        flux[20:30] = 0.99
+        return LightCurve(time_days=time, flux=flux, flux_err=0.001)
+
+    def test_flux_ratio_none_returns_original_object(self, lc) -> None:
+        result = self._renorm(lc, None)
+        assert result is lc
+
+    def test_flux_ratio_none_values_unchanged(self, lc) -> None:
+        result = self._renorm(lc, None)
+        np.testing.assert_array_equal(result.flux, lc.flux)
+        np.testing.assert_array_equal(result.time_days, lc.time_days)
+
+    def test_flux_ratio_zero_returns_original_object(self, lc) -> None:
+        result = self._renorm(lc, 0.0)
+        assert result is lc
+
+    def test_flux_ratio_greater_than_one_returns_original_object(self, lc) -> None:
+        result = self._renorm(lc, 1.5)
+        assert result is lc
+
+    def test_flux_ratio_exactly_one_applies_renorm(self, lc) -> None:
+        # flux_ratio=1.0: (flux - 0) / 1 = flux unchanged numerically,
+        # but a new LightCurve object is returned (passes the guard: 0 < 1.0 <= 1.0)
+        result = self._renorm(lc, 1.0)
+        np.testing.assert_allclose(result.flux, lc.flux, rtol=1e-12)
+
+    def test_flux_ratio_half_doubles_depth(self, lc) -> None:
+        """flux_ratio=0.5 → renormed = (flux - 0.5) / 0.5 = 2*flux - 1."""
+        result = self._renorm(lc, 0.5)
+        expected_flux = (lc.flux - 0.5) / 0.5
+        np.testing.assert_allclose(result.flux, expected_flux, rtol=1e-12)
+
+    def test_flux_ratio_half_doubles_sigma(self, lc) -> None:
+        result = self._renorm(lc, 0.5)
+        assert result.sigma == pytest.approx(lc.sigma / 0.5)
+
+    def test_returned_lc_has_same_time_array(self, lc) -> None:
+        result = self._renorm(lc, 0.5)
+        np.testing.assert_array_equal(result.time_days, lc.time_days)
+
+    def test_flux_ratio_negative_returns_original_object(self, lc) -> None:
+        result = self._renorm(lc, -0.1)
+        assert result is lc
+
+    def test_flux_ratio_valid_returns_new_object(self, lc) -> None:
+        """A physical flux_ratio in (0, 1] returns a new LightCurve, not the input."""
+        result = self._renorm(lc, 0.7)
+        assert result is not lc
+
+    def test_flux_ratio_valid_flux_formula(self, lc) -> None:
+        """Verify renorm formula: new_flux = (flux - (1 - fr)) / fr."""
+        fr = 0.8
+        result = self._renorm(lc, fr)
+        expected = (lc.flux - (1.0 - fr)) / fr
+        np.testing.assert_allclose(result.flux, expected, rtol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# TRILEGAL loading conditions
+# ---------------------------------------------------------------------------
+
+class TestTrilegalLoading:
+    """Engine should call population provider only when a trilegal scenario is present."""
+
+    class _MockPopulationProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        def query(self, ra_deg, dec_deg, target_tmag, cache_path=None):
+            self.call_count += 1
+            return object()  # opaque sentinel
+
+    @pytest.fixture()
+    def stellar_field(self):
+        target = Star(
+            tic_id=99999,
+            ra_deg=10.0, dec_deg=20.0,
+            tmag=12.0, jmag=11.5, hmag=11.2, kmag=11.1,
+            bmag=13.0, vmag=12.5,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5778.0,
+                logg=4.44, metallicity_dex=0.0, parallax_mas=10.0,
+            ),
+        )
+        return StellarField(
+            target_id=99999, mission="TESS",
+            search_radius_pixels=10, stars=[target],
+        )
+
+    @pytest.fixture()
+    def transit_lc(self):
+        time = np.linspace(-0.1, 0.1, 50)
+        return LightCurve(time_days=time, flux=np.ones(50), flux_err=0.001)
+
+    @pytest.fixture()
+    def small_config(self):
+        return Config(n_mc_samples=100, n_best_samples=10)
+
+    def test_no_trilegal_scenarios_provider_not_called(
+        self, stellar_field, transit_lc, small_config,
+    ) -> None:
+        """TP/EB scenarios only — trilegal provider must not be invoked."""
+        tp_result = _make_result(ScenarioID.TP, lnZ=0.0)
+        eb_result = _make_result(ScenarioID.EB, lnZ=-1.0)
+        eb_twin = _make_result(ScenarioID.EBX2P, lnZ=-2.0)
+
+        registry = ScenarioRegistry()
+        registry.register(_FakeScenario(ScenarioID.TP, False, tp_result))
+        registry.register(_FakeScenario(ScenarioID.EB, True, (eb_result, eb_twin)))
+
+        pop = self._MockPopulationProvider()
+        engine = ValidationEngine(registry=registry, population_provider=pop)
+        engine.compute(
+            transit_lc, stellar_field, period_days=5.0, config=small_config,
+        )
+        assert pop.call_count == 0
+
+    def test_dtp_scenario_calls_trilegal_provider(
+        self, stellar_field, transit_lc, small_config,
+    ) -> None:
+        """DTP scenario is in trilegal_scenarios() → provider must be queried."""
+        dtp_result = _make_result(ScenarioID.DTP, lnZ=-0.5)
+
+        registry = ScenarioRegistry()
+        registry.register(_FakeScenario(ScenarioID.DTP, False, dtp_result))
+
+        pop = self._MockPopulationProvider()
+        engine = ValidationEngine(registry=registry, population_provider=pop)
+        engine.compute(
+            transit_lc, stellar_field, period_days=5.0, config=small_config,
+        )
+        assert pop.call_count == 1
+
+    def test_btp_scenario_calls_trilegal_provider(
+        self, stellar_field, transit_lc, small_config,
+    ) -> None:
+        """BTP scenario is in trilegal_scenarios() → provider must be queried."""
+        btp_result = _make_result(ScenarioID.BTP, lnZ=-0.5)
+
+        registry = ScenarioRegistry()
+        registry.register(_FakeScenario(ScenarioID.BTP, False, btp_result))
+
+        pop = self._MockPopulationProvider()
+        engine = ValidationEngine(registry=registry, population_provider=pop)
+        engine.compute(
+            transit_lc, stellar_field, period_days=5.0, config=small_config,
+        )
+        assert pop.call_count == 1
+
+    def test_trilegal_provider_called_exactly_once_for_multiple_trilegal_scenarios(
+        self, stellar_field, transit_lc, small_config,
+    ) -> None:
+        """Provider is fetched once even when multiple trilegal scenarios are present."""
+        dtp_result = _make_result(ScenarioID.DTP, lnZ=-0.5)
+        btp_result = _make_result(ScenarioID.BTP, lnZ=-1.0)
+
+        registry = ScenarioRegistry()
+        registry.register(_FakeScenario(ScenarioID.DTP, False, dtp_result))
+        registry.register(_FakeScenario(ScenarioID.BTP, False, btp_result))
+
+        pop = self._MockPopulationProvider()
+        engine = ValidationEngine(registry=registry, population_provider=pop)
+        engine.compute(
+            transit_lc, stellar_field, period_days=5.0, config=small_config,
+        )
+        assert pop.call_count == 1
+
+    def test_no_provider_does_not_crash_when_trilegal_needed(
+        self, stellar_field, transit_lc, small_config,
+    ) -> None:
+        """If population_provider is None, engine skips TRILEGAL fetch gracefully."""
+        dtp_result = _make_result(ScenarioID.DTP, lnZ=-0.5)
+
+        registry = ScenarioRegistry()
+        registry.register(_FakeScenario(ScenarioID.DTP, False, dtp_result))
+
+        engine = ValidationEngine(registry=registry, population_provider=None)
+        # Should not raise
+        vr = engine.compute(
+            transit_lc, stellar_field, period_days=5.0, config=small_config,
+        )
+        assert isinstance(vr, ValidationResult)
+
+
+# ---------------------------------------------------------------------------
+# n_workers cap at scenario count
+# ---------------------------------------------------------------------------
+
+class TestNWorkersCapAtScenarioCount:
+    """Engine caps n_workers at the number of scenarios to avoid over-subscribing."""
+
+    @pytest.fixture()
+    def stellar_field(self):
+        target = Star(
+            tic_id=11111,
+            ra_deg=5.0, dec_deg=10.0,
+            tmag=11.0, jmag=10.5, hmag=10.2, kmag=10.1,
+            bmag=12.0, vmag=11.5,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5778.0,
+                logg=4.44, metallicity_dex=0.0, parallax_mas=10.0,
+            ),
+        )
+        return StellarField(
+            target_id=11111, mission="TESS",
+            search_radius_pixels=10, stars=[target],
+        )
+
+    @pytest.fixture()
+    def transit_lc(self):
+        time = np.linspace(-0.1, 0.1, 20)
+        return LightCurve(time_days=time, flux=np.ones(20), flux_err=0.001)
+
+    def _make_registry_with_n_scenarios(self, n: int) -> ScenarioRegistry:
+        """Build a registry with n TP fake scenarios (using distinct IDs)."""
+        ids = [
+            ScenarioID.TP, ScenarioID.PTP, ScenarioID.DTP,
+            ScenarioID.BTP, ScenarioID.STP, ScenarioID.NTP,
+        ]
+        registry = ScenarioRegistry()
+        for sid in ids[:n]:
+            result = _make_result(sid, lnZ=0.0)
+            registry.register(_FakeScenario(sid, False, result))
+        return registry
+
+    def test_n_workers_100_with_3_scenarios_does_not_crash(
+        self, stellar_field, transit_lc,
+    ) -> None:
+        """n_workers=100 with only 3 scenarios must complete without error."""
+        config = Config(n_mc_samples=50, n_best_samples=5, n_workers=3)
+        registry = self._make_registry_with_n_scenarios(3)
+        engine = ValidationEngine(registry=registry)
+        vr = engine.compute(
+            transit_lc, stellar_field, period_days=5.0, config=config,
+        )
+        assert isinstance(vr, ValidationResult)
+        assert len(vr.scenario_results) == 3
+
+    def test_n_workers_capped_via_mock(
+        self, stellar_field, transit_lc,
+    ) -> None:
+        """Verify ProcessPoolExecutor is called with max_workers <= len(scenarios)."""
+        from unittest.mock import MagicMock, patch
+
+        config = Config(n_mc_samples=50, n_best_samples=5, n_workers=100)
+        registry = self._make_registry_with_n_scenarios(3)
+        engine = ValidationEngine(registry=registry)
+
+        captured: list[int] = []
+
+        original_ppe = __import__(
+            "concurrent.futures", fromlist=["ProcessPoolExecutor"]
+        ).ProcessPoolExecutor
+
+        def _spy_ppe(*args, max_workers=None, **kwargs):
+            captured.append(max_workers)
+            return original_ppe(*args, max_workers=max_workers, **kwargs)
+
+        with patch(
+            "triceratops.validation.engine.ProcessPoolExecutor",
+            side_effect=_spy_ppe,
+        ):
+            engine.compute(
+                transit_lc, stellar_field, period_days=5.0, config=config,
+            )
+
+        assert len(captured) == 1
+        assert captured[0] <= 3, (
+            f"ProcessPoolExecutor called with max_workers={captured[0]}, "
+            "expected <= 3 (number of scenarios)"
+        )
+
+    def test_n_workers_zero_uses_serial_path(
+        self, stellar_field, transit_lc,
+    ) -> None:
+        """n_workers=0 means serial execution — ProcessPoolExecutor is never created."""
+        from unittest.mock import patch
+
+        config = Config(n_mc_samples=50, n_best_samples=5, n_workers=0)
+        registry = self._make_registry_with_n_scenarios(3)
+        engine = ValidationEngine(registry=registry)
+
+        with patch(
+            "triceratops.validation.engine.ProcessPoolExecutor",
+        ) as mock_ppe:
+            vr = engine.compute(
+                transit_lc, stellar_field, period_days=5.0, config=config,
+            )
+
+        mock_ppe.assert_not_called()
+        assert isinstance(vr, ValidationResult)
+        assert len(vr.scenario_results) == 3
