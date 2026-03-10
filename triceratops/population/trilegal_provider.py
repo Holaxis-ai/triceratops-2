@@ -6,6 +6,7 @@ Fixes BUG-07: raises TRILEGALQueryError on failure instead of returning 0.0.
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from time import sleep
@@ -31,6 +32,19 @@ _TRILEGAL_URLS = [
 ]
 _TRILEGAL_BASE = "https://stev.oapd.inaf.it/"
 _PHOTSYS = "tab_mag_odfnew/tab_mag_TESS_2mass_kepler.dat"
+
+
+def _default_cache_dir() -> Path:
+    """Return a platform-appropriate cache directory for TRILEGAL results.
+
+    Respects ``$XDG_CACHE_HOME`` when set, otherwise falls back to
+    ``~/.cache/triceratops/trilegal/``.  The directory is created if it does
+    not already exist.
+    """
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    cache_dir = cache / "triceratops" / "trilegal"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
 
 
 def _submit_trilegal_form(ra_deg: float, dec_deg: float) -> str | None:
@@ -143,7 +157,9 @@ class TRILEGALProvider:
         target_tmag:
             TESS magnitude of the target star (used for filtering).
         cache_path:
-            Optional explicit path for the cached CSV.
+            Optional explicit path for the cached CSV.  When *None* a
+            platform-appropriate default is chosen automatically so that
+            results are never written to the current working directory.
         poll_timeout_seconds:
             Maximum time (seconds) to wait for TRILEGAL to finish.
             Default: 600 (10 minutes).
@@ -158,20 +174,24 @@ class TRILEGALProvider:
         if cache_path is not None and cache_path.exists():
             return parse_trilegal_csv(cache_path, target_tmag)
 
+        if cache_path is None:
+            cache_dir = _default_cache_dir()
+            cache_path = cache_dir / f"trilegal_{ra_deg:.4f}_{dec_deg:.4f}.csv"
+
         try:
             output_url = _submit_trilegal_form(ra_deg, dec_deg)
             if output_url is None:
                 raise TRILEGALQueryError(
                     f"TRILEGAL service unavailable for ra={ra_deg}, dec={dec_deg}"
                 )
-            save_to = cache_path or Path(f"trilegal_{ra_deg:.4f}_{dec_deg:.4f}.csv")
+            save_to = cache_path
             _download_and_save(
                 output_url,
                 save_to,
                 poll_timeout_seconds=poll_timeout_seconds,
                 poll_interval_seconds=poll_interval_seconds,
             )
-            return parse_trilegal_csv(save_to, target_tmag)
+            return parse_trilegal_csv(cache_path, target_tmag)
         except TRILEGALQueryError:
             raise
         except TimeoutError as exc:
