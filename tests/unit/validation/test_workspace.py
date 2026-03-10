@@ -225,6 +225,43 @@ class TestStarMutation:
         with pytest.raises(AttributeError, match="no attribute"):
             workspace.update_star(12345678, nonexistent_field=42)
 
+    def test_remove_target_raises(self, workspace: ValidationWorkspace) -> None:
+        """Removing the target star must raise, not silently corrupt the field."""
+        target_id = workspace.target.tic_id
+        with pytest.raises(ValueError, match="Cannot remove the target"):
+            workspace.remove_star(target_id)
+
+    def test_add_duplicate_tic_raises(self, workspace: ValidationWorkspace) -> None:
+        """Adding a star whose TIC ID already exists must raise."""
+        existing_id = workspace.stars[1].tic_id
+        with pytest.raises(ValueError, match="already exists"):
+            workspace.add_star(_neighbor_star(tic_id=existing_id))
+
+    def test_update_alias_without_stellar_params_raises_typeerror(
+        self, workspace: ValidationWorkspace,
+    ) -> None:
+        """Alias update (Teff) on a star with stellar_params=None must raise TypeError."""
+        # The neighbor star has no stellar_params
+        neighbor_id = workspace.stars[1].tic_id
+        with pytest.raises(TypeError, match="stellar_params is None"):
+            workspace.update_star(neighbor_id, Teff=6000.0)
+
+    def test_remove_star_invalidates_result(self, workspace: ValidationWorkspace) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=0, false_positive_probability=0.5,
+            nearby_false_positive_probability=0.0, scenario_results=[],
+        )
+        workspace.remove_star(99999999)
+        assert workspace._last_result is None
+
+    def test_update_star_invalidates_result(self, workspace: ValidationWorkspace) -> None:
+        workspace._last_result = ValidationResult(
+            target_id=0, false_positive_probability=0.5,
+            nearby_false_positive_probability=0.0, scenario_results=[],
+        )
+        workspace.update_star(12345678, tmag=11.5)
+        assert workspace._last_result is None
+
 
 # ---------------------------------------------------------------------------
 # Result access tests

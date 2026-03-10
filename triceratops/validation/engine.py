@@ -266,6 +266,11 @@ class ValidationEngine:
         Returns:
             ValidationResult with FPP, NFPP, and per-scenario results.
         """
+        # Guard: structural field invariants (empty stars, wrong target at index 0,
+        # duplicate TIC IDs).  Catches corrupted or directly-constructed payloads
+        # before any compute work begins.
+        prepared.stellar_field.validate()
+
         # Guard: target_id must match the stellar field to prevent misattributed results
         # from corrupted or mis-assembled payloads in serialized/remote job flows.
         field_target_id = prepared.stellar_field.target_id

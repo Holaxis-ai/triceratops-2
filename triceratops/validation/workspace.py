@@ -86,57 +86,40 @@ class ValidationWorkspace:
         return self._stellar_field.target
 
     def add_star(self, star: Star) -> None:
-        """Add a star to the stellar field. Invalidates cached results."""
-        self._stellar_field.stars.append(star)
+        """Add a neighbor star to the stellar field. Invalidates cached results.
+
+        Raises:
+            ValueError: If a star with the same TIC ID already exists.
+        """
+        self._stellar_field.add_neighbor(star)
         self._last_result = None
 
     def remove_star(self, tic_id: int) -> None:
-        """Remove a star by TIC ID. Raises ValueError if not found."""
-        original_len = len(self._stellar_field.stars)
-        self._stellar_field.stars[:] = [
-            s for s in self._stellar_field.stars if s.tic_id != tic_id
-        ]
-        if len(self._stellar_field.stars) == original_len:
-            raise ValueError(f"Star with TIC ID {tic_id} not found in stellar field.")
+        """Remove a star by TIC ID. Invalidates cached results.
+
+        Raises:
+            ValueError: If tic_id is the target star.
+            ValueError: If no star with tic_id is found.
+        """
+        self._stellar_field.remove_neighbor(tic_id)
         self._last_result = None
 
     def update_star(self, tic_id: int, **kwargs: object) -> None:
-        """Update fields on a star by TIC ID. Raises ValueError if not found.
+        """Update fields on a star by TIC ID. Invalidates cached results.
 
         Accepts both direct Star attribute names and TIC-style aliases:
           Teff → stellar_params.teff_k
           mass → stellar_params.mass_msun
           logg → stellar_params.logg
           metallicity → stellar_params.metallicity_dex
+
+        Raises:
+            ValueError: If no star with tic_id is found.
+            TypeError: If an alias update is requested and stellar_params is None.
+            AttributeError: If an unknown attribute name is given.
         """
-        from dataclasses import replace
-
-        # TIC catalog name → (StellarParameters field name,)
-        _STELLAR_PARAMS_ALIASES: dict[str, str] = {
-            "Teff": "teff_k",
-            "mass": "mass_msun",
-            "logg": "logg",
-            "metallicity": "metallicity_dex",
-        }
-
-        for star in self._stellar_field.stars:
-            if star.tic_id == tic_id:
-                stellar_updates: dict[str, object] = {}
-                for attr, value in kwargs.items():
-                    if attr in _STELLAR_PARAMS_ALIASES:
-                        stellar_updates[_STELLAR_PARAMS_ALIASES[attr]] = value
-                    elif hasattr(star, attr):
-                        object.__setattr__(star, attr, value)
-                    else:
-                        raise AttributeError(f"Star has no attribute {attr!r}")
-                if stellar_updates:
-                    object.__setattr__(
-                        star, "stellar_params",
-                        replace(star.stellar_params, **stellar_updates),
-                    )
-                self._last_result = None
-                return
-        raise ValueError(f"Star with TIC ID {tic_id} not found.")
+        self._stellar_field.update_star(tic_id, **kwargs)
+        self._last_result = None
 
     # -- Flux/depth computation --
 

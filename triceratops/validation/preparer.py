@@ -162,6 +162,9 @@ class ValidationPreparer:
             search_radius_px=search_radius,
             mission=mission,
         )
+        # Validate immediately after assembly — catch catalog bugs before any
+        # downstream IO (TRILEGAL fetch, file loads).
+        stellar_field.validate()
 
         # ---- 2. Flux ratios and transit depths (if depth data provided) ----
         if (
