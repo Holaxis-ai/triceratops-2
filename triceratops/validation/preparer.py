@@ -41,6 +41,7 @@ from triceratops.config.config import Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve, StellarField
 from triceratops.domain.value_objects import ContrastCurve
 from triceratops.population.protocols import PopulationSynthesisProvider, TRILEGALResult
+from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
 from triceratops.validation.job import PreparedValidationInputs, PreparedValidationMetadata
 
 
@@ -60,6 +61,7 @@ class ValidationPreparer:
         catalog_provider: StarCatalogProvider,
         population_provider: PopulationSynthesisProvider | None = None,
         aperture_provider: ApertureProvider | None = None,
+        registry: ScenarioRegistry | None = None,
     ) -> None:
         """Construct with injected providers.
 
@@ -70,10 +72,15 @@ class ValidationPreparer:
             aperture_provider: Optional.  Provides pixel-level aperture data for
                 flux-ratio computation.  If None, flux ratios must be set via
                 calc_depths() / set directly on stars before compute.
+            registry: Scenario registry used to validate scenario_ids and determine
+                TRILEGAL eligibility.  Must be the same registry passed to the
+                ValidationEngine that will call compute_prepared().  Defaults to
+                DEFAULT_REGISTRY.
         """
         self._catalog = catalog_provider
         self._population = population_provider
         self._aperture = aperture_provider
+        self._registry = registry if registry is not None else DEFAULT_REGISTRY
 
     def prepare(
         self,
@@ -142,11 +149,10 @@ class ValidationPreparer:
         # Unregistered IDs are silently tolerated by nothing downstream — they would
         # crash with KeyError inside compute().  Fail here instead with the ID named.
         if scenario_ids is not None:
-            from triceratops.scenarios.registry import DEFAULT_REGISTRY as _reg
-            unknown = [sid for sid in scenario_ids if _reg.get_or_none(sid) is None]
+            unknown = [sid for sid in scenario_ids if self._registry.get_or_none(sid) is None]
             if unknown:
                 raise ValueError(
-                    f"scenario_ids contains IDs not registered in DEFAULT_REGISTRY: {unknown}. "
+                    f"scenario_ids contains IDs not registered in the registry: {unknown}. "
                     "Remove them or register the corresponding scenario before calling prepare()."
                 )
 
@@ -185,13 +191,12 @@ class ValidationPreparer:
         trilegal_cache_origin: str | None = None
         if self._population is not None:
             from triceratops.domain.scenario_id import ScenarioID
-            from triceratops.scenarios.registry import DEFAULT_REGISTRY
 
             # scenario_ids already validated in step 0; all IDs are registered.
             if scenario_ids is not None:
-                eligible = [DEFAULT_REGISTRY.get(sid) for sid in scenario_ids]
+                eligible = [self._registry.get(sid) for sid in scenario_ids]
             else:
-                eligible = DEFAULT_REGISTRY.all_scenarios()
+                eligible = self._registry.all_scenarios()
             needs_trilegal = any(
                 s.scenario_id in ScenarioID.trilegal_scenarios()
                 for s in eligible

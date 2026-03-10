@@ -743,7 +743,7 @@ class TestPreparerScenarioIdsValidation:
         from triceratops.domain.scenario_id import ScenarioID
 
         preparer = self._make_preparer()
-        with pytest.raises(ValueError, match="not registered in DEFAULT_REGISTRY"):
+        with pytest.raises(ValueError, match="not registered in the registry"):
             preparer.prepare(
                 target_id=5555,
                 sectors=np.array([1]),
@@ -789,6 +789,62 @@ class TestPreparerScenarioIdsValidation:
             )
         except ValueError as e:
             assert "not registered" not in str(e), f"Unexpected validation error: {e}"
+
+    def test_custom_registry_accepts_its_own_ids(self, lc: LightCurve, cfg: Config) -> None:
+        """A preparer built with a custom registry should accept IDs in that registry,
+        even if those IDs are not in DEFAULT_REGISTRY."""
+        import numpy as np
+        from unittest.mock import MagicMock
+        from triceratops.domain.scenario_id import ScenarioID
+        from triceratops.domain.value_objects import StellarParameters
+        from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
+        from triceratops.validation.preparer import ValidationPreparer
+
+        # Build a registry with only TP — the rest are absent.
+        custom_reg = ScenarioRegistry()
+        custom_reg.register(DEFAULT_REGISTRY.get(ScenarioID.TP))
+
+        star = Star(
+            tic_id=6666,
+            ra_deg=0.0, dec_deg=0.0,
+            tmag=10.0, jmag=9.5, hmag=9.3, kmag=9.2,
+            bmag=10.5, vmag=10.2,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5500.0,
+                logg=4.4, metallicity_dex=0.0, parallax_mas=10.0,
+            ),
+            flux_ratio=1.0,
+            transit_depth_required=0.01,
+        )
+        sf = StellarField(target_id=6666, mission="TESS", search_radius_pixels=10, stars=[star])
+        mock_catalog = MagicMock()
+        mock_catalog.query_nearby_stars.return_value = sf
+
+        preparer = ValidationPreparer(catalog_provider=mock_catalog, registry=custom_reg)
+
+        # TP is in the custom registry — must not raise
+        try:
+            preparer.prepare(
+                target_id=6666,
+                sectors=np.array([1]),
+                light_curve=lc,
+                config=cfg,
+                period_days=5.0,
+                scenario_ids=[ScenarioID.TP],
+            )
+        except ValueError as e:
+            assert "not registered" not in str(e), f"Unexpected validation error: {e}"
+
+        # EB is NOT in the custom registry — must raise
+        with pytest.raises(ValueError, match="not registered in the registry"):
+            preparer.prepare(
+                target_id=6666,
+                sectors=np.array([1]),
+                light_curve=lc,
+                config=cfg,
+                period_days=5.0,
+                scenario_ids=[ScenarioID.EB],
+            )
 
 
 class TestPrepareComputeScenarioContract:
