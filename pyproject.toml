@@ -32,6 +32,9 @@ dev = [
 where = ["."]
 include = ["triceratops*"]
 
+[tool.setuptools.package-data]
+"triceratops.data" = ["*.csv"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
