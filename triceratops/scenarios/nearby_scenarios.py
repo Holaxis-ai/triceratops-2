@@ -45,9 +45,9 @@ from triceratops.priors.sampling import (
     sample_mass_ratio,
     sample_planet_radius,
 )
+from triceratops.scenarios._eb_branching import build_eb_branch_masks
 from triceratops.scenarios.base import BaseScenario
 from triceratops.scenarios.constants import (
-    EB_Q_TWIN_THRESHOLD,
     LN2PI,
     MAIN_SEQUENCE_LOGG_MIN,
     MAIN_SEQUENCE_TEFF_MAX,
@@ -434,11 +434,11 @@ class NEBUnknownScenario(BaseScenario):
         # Extra mask: main-sequence filter
         ms_mask = (loggs >= MAIN_SEQUENCE_LOGG_MIN) & (teffs <= MAIN_SEQUENCE_TEFF_MAX)
 
-        # q < 0.95
-        q_lt_mask = qs < EB_Q_TWIN_THRESHOLD
-        mask = build_transit_mask(
-            samples["incs"], geometry["Ptra"], geometry["coll"],
-            extra_mask=q_lt_mask & ms_mask,
+        mask, mask_twin = build_eb_branch_masks(
+            qs, samples["incs"],
+            geometry["Ptra"], geometry["coll"],
+            geometry["Ptra_twin"], geometry["coll_twin"],
+            extra_mask=ms_mask,
         )
 
         chi2_half = lnL_eb_p(
@@ -462,13 +462,6 @@ class NEBUnknownScenario(BaseScenario):
             force_serial=force_serial,
         )
         lnL = -0.5 * _ln2pi - lnsigma - chi2_half
-
-        # q >= 0.95: twin at 2x period
-        q_ge_mask = qs >= EB_Q_TWIN_THRESHOLD
-        mask_twin = build_transit_mask(
-            samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
-            extra_mask=q_ge_mask & ms_mask,
-        )
 
         chi2_half_twin = lnL_eb_twin_p(
             time=light_curve.time_days,
@@ -818,11 +811,10 @@ class NEBEvolvedScenario(BaseScenario):
         lnL = np.full(N, -np.inf)
         lnL_twin = np.full(N, -np.inf)
 
-        # q < 0.95
-        q_lt_mask = qs < EB_Q_TWIN_THRESHOLD
-        mask = build_transit_mask(
-            samples["incs"], geometry["Ptra"], geometry["coll"],
-            extra_mask=q_lt_mask,
+        mask, mask_twin = build_eb_branch_masks(
+            qs, samples["incs"],
+            geometry["Ptra"], geometry["coll"],
+            geometry["Ptra_twin"], geometry["coll_twin"],
         )
 
         chi2_half = lnL_eb_p(
@@ -846,13 +838,6 @@ class NEBEvolvedScenario(BaseScenario):
             force_serial=force_serial,
         )
         lnL = -0.5 * _ln2pi - lnsigma - chi2_half
-
-        # q >= 0.95: twin at 2x period
-        q_ge_mask = qs >= EB_Q_TWIN_THRESHOLD
-        mask_twin = build_transit_mask(
-            samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
-            extra_mask=q_ge_mask,
-        )
 
         # BUG-05 fix: pass radii (array) not scalar R_s
         chi2_half_twin = lnL_eb_twin_p(

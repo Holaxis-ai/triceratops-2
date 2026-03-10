@@ -30,9 +30,9 @@ from triceratops.priors.sampling import (
     sample_mass_ratio,
     sample_planet_radius,
 )
+from triceratops.scenarios._eb_branching import build_eb_branch_masks
 from triceratops.scenarios.base import BaseScenario
 from triceratops.scenarios.constants import (
-    EB_Q_TWIN_THRESHOLD,
     LN2PI,
 )
 from triceratops.scenarios.kernels import build_transit_mask
@@ -321,11 +321,10 @@ class TEBScenario(BaseScenario):
         lnL = np.full(N, -np.inf)
         lnL_twin = np.full(N, -np.inf)
 
-        # q < 0.95: standard EB
-        q_lt_mask = qs < EB_Q_TWIN_THRESHOLD
-        mask = build_transit_mask(
-            samples["incs"], geometry["Ptra"], geometry["coll"],
-            extra_mask=q_lt_mask,
+        mask, mask_twin = build_eb_branch_masks(
+            qs, samples["incs"],
+            geometry["Ptra"], geometry["coll"],
+            geometry["Ptra_twin"], geometry["coll_twin"],
         )
 
         chi2_half = lnL_eb_p(
@@ -386,13 +385,6 @@ class TEBScenario(BaseScenario):
             )
             ext_lnL = -0.5 * _ln2pi - np.log(elc.sigma) - ext_chi2
             lnL = lnL + ext_lnL
-
-        # q >= 0.95: twin EB at 2x period
-        q_ge_mask = qs >= EB_Q_TWIN_THRESHOLD
-        mask_twin = build_transit_mask(
-            samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
-            extra_mask=q_ge_mask,
-        )
 
         chi2_half_twin = lnL_eb_twin_p(
             time=light_curve.time_days,

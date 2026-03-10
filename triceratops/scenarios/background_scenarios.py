@@ -59,9 +59,9 @@ from triceratops.scenarios._background_helpers import (
     _resolve_sdss_target_mags,
     _sample_population_indices,
 )
+from triceratops.scenarios._eb_branching import build_eb_branch_masks
 from triceratops.scenarios.base import BaseScenario
 from triceratops.scenarios.constants import (
-    EB_Q_TWIN_THRESHOLD,
     LN2PI,
     MAIN_SEQUENCE_LOGG_MIN,
     MAIN_SEQUENCE_TEFF_MAX,
@@ -522,24 +522,16 @@ class DEBScenario(BaseScenario):
         lnprior = samples["lnprior_companion"]
         comp_fr = fluxratios_comp[idxs]
 
-        # q < 0.95: standard EB
-        q_lt_mask = qs < EB_Q_TWIN_THRESHOLD
-        mask = build_transit_mask(
-            samples["incs"], geometry["Ptra"], geometry["coll"],
-            extra_mask=q_lt_mask,
+        mask, mask_twin = build_eb_branch_masks(
+            qs, samples["incs"],
+            geometry["Ptra"], geometry["coll"],
+            geometry["Ptra_twin"], geometry["coll_twin"],
         )
         lnL = self._deb_branch_lnL(
             light_curve, lnsigma, samples, geometry, external_lcs,
             R_s_arr, u1_arr, u2_arr, comp_fr, idxs, mask,
             lnL_fn=lnL_eb_p, a_key="a", period_mult=1, N=N,
             force_serial=force_serial,
-        )
-
-        # q >= 0.95: twin EB at 2x period
-        q_ge_mask = qs >= EB_Q_TWIN_THRESHOLD
-        mask_twin = build_transit_mask(
-            samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
-            extra_mask=q_ge_mask,
         )
         lnL_twin = self._deb_branch_lnL(
             light_curve, lnsigma, samples, geometry, external_lcs,
@@ -1311,25 +1303,20 @@ class BEBScenario(BaseScenario):
 
         force_serial = (not config.parallel) and not bool(external_lcs)
 
-        # --- q < 0.95: standard EB ---
-        # NC-04 fix: use geometry["coll"] (actual-period collision) not "coll_twin".
-        q_lt_mask = (qs < EB_Q_TWIN_THRESHOLD) & extra_logg_teff
-        mask = build_transit_mask(
-            samples["incs"], geometry["Ptra"], geometry["coll"],
-            extra_mask=q_lt_mask,
+        # NC-04 fix: standard branch uses geometry["coll"] (actual-period collision),
+        # not "coll_twin".  build_eb_branch_masks threads through whatever coll
+        # the caller supplies, so the fix is preserved by passing coll here.
+        mask, mask_twin = build_eb_branch_masks(
+            qs, samples["incs"],
+            geometry["Ptra"], geometry["coll"],
+            geometry["Ptra_twin"], geometry["coll_twin"],
+            extra_mask=extra_logg_teff,
         )
         lnL = self._beb_branch_lnL(
             light_curve, lnsigma, samples, geometry, external_lcs,
             idxs, comp_fr, comp_params, mask,
             lnL_fn=lnL_eb_p, a_key="a", period_mult=1, N=N,
             force_serial=force_serial,
-        )
-
-        # --- q >= 0.95: twin EB at 2x period ---
-        q_ge_mask = (qs >= EB_Q_TWIN_THRESHOLD) & extra_logg_teff
-        mask_twin = build_transit_mask(
-            samples["incs"], geometry["Ptra_twin"], geometry["coll_twin"],
-            extra_mask=q_ge_mask,
         )
         lnL_twin = self._beb_branch_lnL(
             light_curve, lnsigma, samples, geometry, external_lcs,
