@@ -644,15 +644,17 @@ class TestRenormLightCurveForHost:
 # ---------------------------------------------------------------------------
 
 class TestTrilegalLoading:
-    """Engine should call population provider only when a trilegal scenario is present."""
+    """Phase 2: Engine is provider-free; TRILEGAL population is passed directly.
 
-    class _MockPopulationProvider:
-        def __init__(self):
-            self.call_count = 0
+    The engine no longer calls population_provider.query() internally.
+    TRILEGAL materialisation is the responsibility of ValidationWorkspace /
+    ValidationPreparer, which then pass the result via trilegal_population=.
+    """
 
-        def query(self, ra_deg, dec_deg, target_tmag, cache_path=None):
-            self.call_count += 1
-            return object()  # opaque sentinel
+    class _BoomProvider:
+        """Provider that raises if called — verifies the engine never calls it."""
+        def query(self, **kwargs: object) -> object:
+            raise AssertionError("Engine must not call population_provider directly")
 
     @pytest.fixture()
     def stellar_field(self):
@@ -683,7 +685,7 @@ class TestTrilegalLoading:
     def test_no_trilegal_scenarios_provider_not_called(
         self, stellar_field, transit_lc, small_config,
     ) -> None:
-        """TP/EB scenarios only — trilegal provider must not be invoked."""
+        """TP/EB scenarios only — injected provider must not be called."""
         tp_result = _make_result(ScenarioID.TP, lnZ=0.0)
         eb_result = _make_result(ScenarioID.EB, lnZ=-1.0)
         eb_twin = _make_result(ScenarioID.EBX2P, lnZ=-2.0)
@@ -692,49 +694,66 @@ class TestTrilegalLoading:
         registry.register(_FakeScenario(ScenarioID.TP, False, tp_result))
         registry.register(_FakeScenario(ScenarioID.EB, True, (eb_result, eb_twin)))
 
-        pop = self._MockPopulationProvider()
-        engine = ValidationEngine(registry=registry, population_provider=pop)
+        # Even with a boom provider injected, it must never be called
+        engine = ValidationEngine(registry=registry, population_provider=self._BoomProvider())
         engine.compute(
             transit_lc, stellar_field, period_days=5.0, config=small_config,
         )
-        assert pop.call_count == 0
+        # If we reach here, the provider was not called — test passes.
 
-    def test_dtp_scenario_calls_trilegal_provider(
+    def test_dtp_scenario_with_population_passed_directly(
         self, stellar_field, transit_lc, small_config,
     ) -> None:
-        """DTP scenario is in trilegal_scenarios() → provider must be queried."""
-        dtp_result = _make_result(ScenarioID.DTP, lnZ=-0.5)
+        """DTP scenario: engine accepts trilegal_population directly, no provider needed."""
+        from triceratops.population.protocols import TRILEGALResult
 
+        dtp_result = _make_result(ScenarioID.DTP, lnZ=-0.5)
         registry = ScenarioRegistry()
         registry.register(_FakeScenario(ScenarioID.DTP, False, dtp_result))
 
-        pop = self._MockPopulationProvider()
-        engine = ValidationEngine(registry=registry, population_provider=pop)
-        engine.compute(
-            transit_lc, stellar_field, period_days=5.0, config=small_config,
+        fake_pop = TRILEGALResult(
+            tmags=np.array([15.0]),
+            masses=np.array([0.5]),
+            loggs=np.array([4.5]),
+            teffs=np.array([4000.0]),
+            metallicities=np.array([0.0]),
+            jmags=np.array([14.0]),
+            hmags=np.array([13.8]),
+            kmags=np.array([13.7]),
+            gmags=np.array([16.0]),
+            rmags=np.array([15.5]),
+            imags=np.array([15.2]),
+            zmags=np.array([15.0]),
         )
-        assert pop.call_count == 1
+        # Boom provider ensures engine never calls it
+        engine = ValidationEngine(registry=registry, population_provider=self._BoomProvider())
+        vr = engine.compute(
+            transit_lc, stellar_field, period_days=5.0, config=small_config,
+            trilegal_population=fake_pop,
+        )
+        assert isinstance(vr, ValidationResult)
 
-    def test_btp_scenario_calls_trilegal_provider(
+    def test_btp_scenario_with_population_none_does_not_crash(
         self, stellar_field, transit_lc, small_config,
     ) -> None:
-        """BTP scenario is in trilegal_scenarios() → provider must be queried."""
+        """BTP scenario: engine does not crash when trilegal_population=None."""
         btp_result = _make_result(ScenarioID.BTP, lnZ=-0.5)
-
         registry = ScenarioRegistry()
         registry.register(_FakeScenario(ScenarioID.BTP, False, btp_result))
 
-        pop = self._MockPopulationProvider()
-        engine = ValidationEngine(registry=registry, population_provider=pop)
-        engine.compute(
+        engine = ValidationEngine(registry=registry, population_provider=None)
+        vr = engine.compute(
             transit_lc, stellar_field, period_days=5.0, config=small_config,
+            trilegal_population=None,
         )
-        assert pop.call_count == 1
+        assert isinstance(vr, ValidationResult)
 
-    def test_trilegal_provider_called_exactly_once_for_multiple_trilegal_scenarios(
+    def test_trilegal_provider_never_called_even_for_multiple_trilegal_scenarios(
         self, stellar_field, transit_lc, small_config,
     ) -> None:
-        """Provider is fetched once even when multiple trilegal scenarios are present."""
+        """Engine never calls provider even when multiple trilegal scenarios are present."""
+        from triceratops.population.protocols import TRILEGALResult
+
         dtp_result = _make_result(ScenarioID.DTP, lnZ=-0.5)
         btp_result = _make_result(ScenarioID.BTP, lnZ=-1.0)
 
@@ -742,17 +761,31 @@ class TestTrilegalLoading:
         registry.register(_FakeScenario(ScenarioID.DTP, False, dtp_result))
         registry.register(_FakeScenario(ScenarioID.BTP, False, btp_result))
 
-        pop = self._MockPopulationProvider()
-        engine = ValidationEngine(registry=registry, population_provider=pop)
-        engine.compute(
-            transit_lc, stellar_field, period_days=5.0, config=small_config,
+        fake_pop = TRILEGALResult(
+            tmags=np.array([14.0, 15.0]),
+            masses=np.array([0.5, 0.8]),
+            loggs=np.array([4.5, 4.3]),
+            teffs=np.array([4000.0, 5000.0]),
+            metallicities=np.array([0.0, 0.0]),
+            jmags=np.array([13.0, 14.0]),
+            hmags=np.array([12.8, 13.8]),
+            kmags=np.array([12.7, 13.7]),
+            gmags=np.array([15.0, 16.0]),
+            rmags=np.array([14.5, 15.5]),
+            imags=np.array([14.2, 15.2]),
+            zmags=np.array([14.0, 15.0]),
         )
-        assert pop.call_count == 1
+        engine = ValidationEngine(registry=registry, population_provider=self._BoomProvider())
+        vr = engine.compute(
+            transit_lc, stellar_field, period_days=5.0, config=small_config,
+            trilegal_population=fake_pop,
+        )
+        assert isinstance(vr, ValidationResult)
 
     def test_no_provider_does_not_crash_when_trilegal_needed(
         self, stellar_field, transit_lc, small_config,
     ) -> None:
-        """If population_provider is None, engine skips TRILEGAL fetch gracefully."""
+        """If population_provider is None and no trilegal_population given, engine is graceful."""
         dtp_result = _make_result(ScenarioID.DTP, lnZ=-0.5)
 
         registry = ScenarioRegistry()

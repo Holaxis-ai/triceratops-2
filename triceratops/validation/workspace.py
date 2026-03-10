@@ -184,10 +184,38 @@ class ValidationWorkspace:
     ) -> ValidationResult:
         """Run validation computation and cache the result.
 
+        Provider-backed IO (TRILEGAL population fetch) is performed here, before
+        calling the engine.  The engine receives only materialised data.
+
         Returns:
             ValidationResult, also stored internally for property access.
         """
         self._last_light_curve = light_curve
+
+        # Materialise TRILEGAL population here (workspace owns provider IO).
+        # The engine is provider-free: it only accepts pre-materialised data.
+        trilegal_population = None
+        if self._population_provider is not None:
+            from pathlib import Path
+            from triceratops.domain.scenario_id import ScenarioID as _SID
+            from triceratops.scenarios.registry import DEFAULT_REGISTRY
+
+            eligible = DEFAULT_REGISTRY.all_scenarios()
+            if scenario_ids is not None:
+                eligible = [DEFAULT_REGISTRY.get(sid) for sid in scenario_ids]
+            needs_trilegal = any(
+                s.scenario_id in _SID.trilegal_scenarios() for s in eligible
+            )
+            if needs_trilegal:
+                cache = Path(self._trilegal_cache_path) if self._trilegal_cache_path else None
+                target = self._stellar_field.target
+                trilegal_population = self._population_provider.query(
+                    ra_deg=target.ra_deg,
+                    dec_deg=target.dec_deg,
+                    target_tmag=target.tmag,
+                    cache_path=cache,
+                )
+
         result = self._engine.compute(
             light_curve=light_curve,
             stellar_field=self._stellar_field,
@@ -196,7 +224,7 @@ class ValidationWorkspace:
             scenario_ids=scenario_ids,
             external_lcs=external_lcs,
             contrast_curve=contrast_curve,
-            trilegal_cache_path=self._trilegal_cache_path,
+            trilegal_population=trilegal_population,
             molusc_file=molusc_file,
         )
         self._last_result = result

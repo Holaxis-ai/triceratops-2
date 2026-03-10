@@ -115,8 +115,15 @@ class ValidationEngine:
         catalog_provider: object | None = None,
         population_provider: object | None = None,
     ) -> None:
+        # DEPRECATED: population_provider is no longer used inside compute().
+        # TRILEGAL population must now be fetched by the caller (ValidationWorkspace
+        # or ValidationPreparer) and passed directly via the trilegal_population
+        # parameter of compute() or compute_prepared().
+        # population_provider is accepted here to avoid breaking existing call sites;
+        # it will be removed in a future release.
         self._registry = registry if registry is not None else DEFAULT_REGISTRY
         self._catalog = catalog_provider
+        # _population retained for compat but no longer called internally.
         self._population = population_provider
 
     def compute(
@@ -171,23 +178,10 @@ class ValidationEngine:
         else:
             scenarios_to_run = [self._registry.get(sid) for sid in scenario_ids]
 
-        # Use pre-materialised population if given; otherwise lazy-fetch via provider.
-        # The pre-materialised path is preferred: it keeps the engine provider-free.
-        if trilegal_population is None:
-            needs_trilegal = any(
-                s.scenario_id in ScenarioID.trilegal_scenarios()
-                for s in scenarios_to_run
-            )
-            if needs_trilegal and self._population is not None:
-                target = stellar_field.target
-                from pathlib import Path
-                cache = Path(trilegal_cache_path) if trilegal_cache_path else None
-                trilegal_population = self._population.query(  # type: ignore[union-attr]
-                    ra_deg=target.ra_deg,
-                    dec_deg=target.dec_deg,
-                    target_tmag=target.tmag,
-                    cache_path=cache,
-                )
+        # trilegal_population must be pre-materialised by the caller.
+        # The engine no longer fetches from any provider (Phase 2 boundary).
+        # Callers: pass trilegal_population directly, or rely on ValidationWorkspace /
+        # ValidationPreparer to fetch it before calling compute().
 
         host_magnitudes = self._extract_host_magnitudes(stellar_field.target)
         target_flux_ratio = stellar_field.target.flux_ratio
