@@ -185,11 +185,14 @@ class ValidationWorkspace:
         """Run validation computation and cache the result.
 
         Provider-backed IO (TRILEGAL population fetch) is performed here, before
-        calling the engine.  The engine receives only materialised data.
+        calling the engine via PreparedValidationInputs.  The engine receives
+        only materialised data.
 
         Returns:
             ValidationResult, also stored internally for property access.
         """
+        from triceratops.validation.job import PreparedValidationInputs
+
         self._last_light_curve = light_curve
 
         # Materialise TRILEGAL population here (workspace owns provider IO).
@@ -216,17 +219,39 @@ class ValidationWorkspace:
                     cache_path=cache,
                 )
 
-        result = self._engine.compute(
-            light_curve=light_curve,
-            stellar_field=self._stellar_field,
-            period_days=period_days,
-            config=self.config,
-            scenario_ids=scenario_ids,
-            external_lcs=external_lcs,
-            contrast_curve=contrast_curve,
-            trilegal_population=trilegal_population,
-            molusc_file=molusc_file,
-        )
+        # Build a PreparedValidationInputs and route through compute_prepared().
+        # This keeps the engine's input contract explicit and testable.
+        # scenario_ids filtering happens inside engine.compute() via scenario_ids arg.
+        # For now we pass scenario_ids=None in the prepared path (engine default logic
+        # applies) and fall back to compute() for scenario_id filtering.
+        if scenario_ids is None:
+            prepared = PreparedValidationInputs(
+                target_id=self.tic_id,
+                stellar_field=self._stellar_field,
+                light_curve=light_curve,
+                config=self.config,
+                period_days=period_days,
+                trilegal_population=trilegal_population,
+                external_lcs=external_lcs,
+                contrast_curve=contrast_curve,
+                molusc_file=molusc_file,
+            )
+            result = self._engine.compute_prepared(prepared)
+        else:
+            # scenario_ids filtering path: use compute() directly until compute_prepared
+            # supports scenario_ids selection (planned for a follow-up).
+            result = self._engine.compute(
+                light_curve=light_curve,
+                stellar_field=self._stellar_field,
+                period_days=period_days,
+                config=self.config,
+                scenario_ids=scenario_ids,
+                external_lcs=external_lcs,
+                contrast_curve=contrast_curve,
+                trilegal_population=trilegal_population,
+                molusc_file=molusc_file,
+            )
+
         self._last_result = result
         return result
 

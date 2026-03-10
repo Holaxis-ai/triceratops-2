@@ -1,0 +1,211 @@
+"""ValidationPreparer: owns all provider-backed data acquisition and materialisation.
+
+This module contains the sole place in the system that knows about providers,
+cache paths, and file loading. Its output (PreparedValidationInputs) is the
+clean boundary for provider-free compute.
+
+Two-phase design
+----------------
+Preparer (this module):
+    - Query star catalog via StarCatalogProvider.
+    - Compute flux ratios and transit depths.
+    - Fetch TRILEGAL background population via PopulationSynthesisProvider.
+    - Load contrast curve from disk.
+    - Load external light curves from disk.
+    - Emit a fully-populated PreparedValidationInputs.
+
+Compute (ValidationEngine.compute_prepared):
+    - Accept PreparedValidationInputs.
+    - Execute scenarios with no provider access.
+    - Return ValidationResult.
+
+Remote compute boundary guarantee
+----------------------------------
+Code that runs in a remote worker (e.g. Modal) should only ever call
+``ValidationEngine.compute_prepared()``.  It must never instantiate a
+``ValidationPreparer`` or any provider.
+
+See: working_docs/iteration/priority-3_pure-compute-boundary.md
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+
+from triceratops.catalog.flux_contributions import compute_flux_ratios, compute_transit_depths
+from triceratops.catalog.protocols import ApertureProvider, StarCatalogProvider
+from triceratops.config.config import Config
+from triceratops.domain.entities import ExternalLightCurve, LightCurve, StellarField
+from triceratops.domain.value_objects import ContrastCurve
+from triceratops.population.protocols import PopulationSynthesisProvider, TRILEGALResult
+from triceratops.validation.job import PreparedValidationInputs, PreparedValidationMetadata
+
+
+class ValidationPreparer:
+    """Owns all provider-backed data acquisition and materialisation.
+
+    Produces a PreparedValidationInputs that is ready for provider-free
+    compute via ValidationEngine.compute_prepared().
+
+    All network I/O, filesystem I/O, and provider calls are contained in
+    this class.  Nothing downstream of the returned PreparedValidationInputs
+    should require provider access.
+    """
+
+    def __init__(
+        self,
+        catalog_provider: StarCatalogProvider,
+        population_provider: PopulationSynthesisProvider | None = None,
+        aperture_provider: ApertureProvider | None = None,
+    ) -> None:
+        """Construct with injected providers.
+
+        Args:
+            catalog_provider: Required.  Queries the star catalog.
+            population_provider: Optional.  Fetches TRILEGAL background population.
+                If None, trilegal-dependent scenarios will receive no population data.
+            aperture_provider: Optional.  Provides pixel-level aperture data for
+                flux-ratio computation.  If None, flux ratios must be set via
+                calc_depths() / set directly on stars before compute.
+        """
+        self._catalog = catalog_provider
+        self._population = population_provider
+        self._aperture = aperture_provider
+
+    def prepare(
+        self,
+        target_id: int,
+        sectors: np.ndarray,
+        light_curve: LightCurve,
+        config: Config,
+        period_days: float | list[float],
+        mission: str = "TESS",
+        search_radius: int = 10,
+        transit_depth: float | None = None,
+        pixel_coords_per_sector: list[np.ndarray] | None = None,
+        aperture_pixels_per_sector: list[np.ndarray] | None = None,
+        sigma_psf_px: float = 0.75,
+        trilegal_cache_path: str | None = None,
+        contrast_curve_file: str | None = None,
+        contrast_curve_band: str = "TESS",
+        external_lc_files: list[str] | None = None,
+        filt_lcs: list[str] | None = None,
+        molusc_file: str | None = None,
+        # molusc_file: local path — not yet materialised; deferred to Phase 4
+        # if remote execution requires embedded content rather than a path.
+    ) -> PreparedValidationInputs:
+        """Fetch catalog and population data, load artifacts, return prepared inputs.
+
+        Performs all provider-backed and filesystem IO.  The returned
+        PreparedValidationInputs is self-contained for provider-free compute.
+
+        Args:
+            target_id: TIC (or KIC/EPIC) identifier.
+            sectors: Sector/quarter/campaign numbers as a numpy array.
+            light_curve: Phase-folded, normalised photometric time series.
+            config: Runtime configuration.
+            period_days: Orbital period in days (scalar or [min, max] range).
+            mission: Survey mission name ("TESS", "Kepler", "K2").
+            search_radius: Search radius in pixels for catalog query.
+            transit_depth: Observed transit depth (fractional).  Required if
+                flux ratios should be computed from pixel data.
+            pixel_coords_per_sector: Per-sector star pixel positions for flux
+                ratio computation.  Required together with transit_depth.
+            aperture_pixels_per_sector: Per-sector aperture pixel positions.
+            sigma_psf_px: PSF sigma in pixels for flux ratio computation.
+            trilegal_cache_path: Optional path to a cached TRILEGAL CSV.
+            contrast_curve_file: Optional path to contrast curve file.
+            contrast_curve_band: Filter band label for the contrast curve.
+            external_lc_files: Optional list of paths to external LC files.
+            filt_lcs: Filter band labels for external_lc_files (same length).
+            molusc_file: Local path to MOLUSC output file.
+                NOTE: bare path — not yet materialised; deferred to Phase 4.
+
+        Returns:
+            PreparedValidationInputs ready for ValidationEngine.compute_prepared().
+        """
+        from datetime import datetime, timezone
+
+        warnings: list[str] = []
+
+        # ---- 1. Catalog query ----
+        stellar_field: StellarField = self._catalog.query_nearby_stars(
+            tic_id=target_id,
+            search_radius_px=search_radius,
+            mission=mission,
+        )
+
+        # ---- 2. Flux ratios and transit depths (if depth data provided) ----
+        if (
+            transit_depth is not None
+            and pixel_coords_per_sector is not None
+            and aperture_pixels_per_sector is not None
+        ):
+            flux_ratios = compute_flux_ratios(
+                stellar_field,
+                pixel_coords_per_sector,
+                aperture_pixels_per_sector,
+                sigma_psf_px,
+            )
+            transit_depths = compute_transit_depths(flux_ratios, transit_depth)
+            for star, fr, td in zip(stellar_field.stars, flux_ratios, transit_depths):
+                star.flux_ratio = fr
+                star.transit_depth_required = td
+        else:
+            if transit_depth is not None:
+                warnings.append(
+                    "transit_depth provided but pixel_coords_per_sector or "
+                    "aperture_pixels_per_sector missing — flux ratios not computed."
+                )
+
+        # ---- 3. TRILEGAL population fetch ----
+        trilegal_population: TRILEGALResult | None = None
+        trilegal_cache_origin: str | None = None
+        if self._population is not None:
+            cache = Path(trilegal_cache_path) if trilegal_cache_path else None
+            target = stellar_field.target
+            trilegal_population = self._population.query(
+                ra_deg=target.ra_deg,
+                dec_deg=target.dec_deg,
+                target_tmag=target.tmag,
+                cache_path=cache,
+            )
+            trilegal_cache_origin = trilegal_cache_path
+
+        # ---- 4. Contrast curve loading ----
+        contrast_curve: ContrastCurve | None = None
+        if contrast_curve_file is not None:
+            from triceratops.io.contrast_curves import load_contrast_curve
+            contrast_curve = load_contrast_curve(
+                Path(contrast_curve_file), band=contrast_curve_band,
+            )
+
+        # ---- 5. External light curves loading ----
+        external_lcs: list[ExternalLightCurve] | None = None
+        if external_lc_files and filt_lcs:
+            from triceratops.io.external_lc import load_external_lc_as_object
+            external_lcs = [
+                load_external_lc_as_object(Path(f), b)
+                for f, b in zip(external_lc_files, filt_lcs)
+            ]
+
+        # ---- Metadata ----
+        _metadata = PreparedValidationMetadata(
+            prep_timestamp=datetime.now(tz=timezone.utc),
+            source="ValidationPreparer",
+            trilegal_cache_origin=trilegal_cache_origin,
+            warnings=warnings,
+        )
+
+        return PreparedValidationInputs(
+            target_id=target_id,
+            stellar_field=stellar_field,
+            light_curve=light_curve,
+            config=config,
+            period_days=period_days,
+            trilegal_population=trilegal_population,
+            external_lcs=external_lcs,
+            contrast_curve=contrast_curve,
+            molusc_file=molusc_file,
+        )
