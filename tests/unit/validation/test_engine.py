@@ -266,6 +266,133 @@ class TestAggregateFPPFormula:
 
 
 # ---------------------------------------------------------------------------
+# _aggregate edge cases: FPP/NFPP numerical robustness
+# ---------------------------------------------------------------------------
+
+class TestAggregateAllNegInf:
+    def test_all_lnZ_neg_inf_fpp_and_nfpp_well_defined(self) -> None:
+        """All -inf lnZ: Z_total=0. FPP must be 1.0 and NFPP must be 0.0."""
+        results = [
+            _make_result(ScenarioID.TP, lnZ=-np.inf),
+            _make_result(ScenarioID.EB, lnZ=-np.inf),
+            _make_result(ScenarioID.NTP, lnZ=-np.inf),
+        ]
+        vr = _aggregate(results, target_id=99)
+        # All probs must be 0 or explicitly defined (not NaN)
+        for r in vr.scenario_results:
+            assert np.isfinite(r.relative_probability), (
+                f"{r.scenario_id} has non-finite relative_probability"
+            )
+            assert r.relative_probability == 0.0
+        assert np.isfinite(vr.fpp)
+        assert vr.fpp == pytest.approx(1.0, abs=1e-10)
+        assert np.isfinite(vr.nfpp)
+        assert vr.nfpp == pytest.approx(0.0, abs=1e-10)
+
+
+class TestAggregateNaNInLnZ:
+    def test_nan_lnZ_does_not_propagate_to_fpp(self) -> None:
+        """NaN lnZ is treated as non-finite; planet scenario still determines FPP."""
+        results = [
+            _make_result(ScenarioID.TP, lnZ=0.0),   # finite: will dominate
+            _make_result(ScenarioID.EB, lnZ=float("nan")),  # NaN: treated as -inf
+        ]
+        vr = _aggregate(results, target_id=2)
+        assert np.isfinite(vr.fpp), "FPP must be finite even when one lnZ is NaN"
+        assert np.isfinite(vr.nfpp), "NFPP must be finite even when one lnZ is NaN"
+        # TP dominates; FPP ~ 0
+        assert vr.fpp == pytest.approx(0.0, abs=1e-6)
+
+
+class TestAggregateFPPClipping:
+    def test_fpp_never_exceeds_1(self) -> None:
+        """FPP is clipped to [0, 1]; it must never be > 1.0."""
+        # All non-planet scenarios; planet_prob = 0; FPP = 1
+        results = [
+            _make_result(ScenarioID.EB, lnZ=0.0),
+            _make_result(ScenarioID.PEB, lnZ=0.0),
+        ]
+        vr = _aggregate(results, target_id=3)
+        assert vr.fpp <= 1.0
+
+    def test_fpp_never_negative(self) -> None:
+        """FPP is clipped to [0, 1]; it must never be negative."""
+        # All planet scenarios; FPP = 0
+        results = [
+            _make_result(ScenarioID.TP, lnZ=0.0),
+            _make_result(ScenarioID.PTP, lnZ=0.0),
+            _make_result(ScenarioID.DTP, lnZ=0.0),
+        ]
+        vr = _aggregate(results, target_id=4)
+        assert vr.fpp >= 0.0
+        assert vr.fpp == pytest.approx(0.0, abs=1e-10)
+
+    def test_fpp_clipped_to_exactly_1_when_no_planets(self) -> None:
+        """When planet_prob=0, FPP = np.clip(1.0, 0, 1) = exactly 1.0."""
+        results = [
+            _make_result(ScenarioID.EB, lnZ=1.0),
+        ]
+        vr = _aggregate(results, target_id=5)
+        assert vr.fpp == 1.0
+
+
+class TestAggregateNFPPNoNearby:
+    def test_nfpp_zero_when_no_nearby_scenarios(self) -> None:
+        """No NTP/NEB/NEBx2P scenarios present => NFPP = 0.0."""
+        results = [
+            _make_result(ScenarioID.TP, lnZ=0.0),
+            _make_result(ScenarioID.EB, lnZ=-1.0),
+            _make_result(ScenarioID.PEB, lnZ=-2.0),
+        ]
+        vr = _aggregate(results, target_id=6)
+        assert vr.nfpp == pytest.approx(0.0, abs=1e-10)
+
+
+class TestAggregateProbabilitySum:
+    def test_relative_probs_always_sum_to_1(self) -> None:
+        """For any valid input, sum of relative_probability must be 1.0."""
+        results = [
+            _make_result(ScenarioID.TP, lnZ=-0.5),
+            _make_result(ScenarioID.EB, lnZ=-1.5),
+            _make_result(ScenarioID.PEB, lnZ=-3.0),
+            _make_result(ScenarioID.NTP, lnZ=-2.0),
+            _make_result(ScenarioID.DTP, lnZ=-4.0),
+        ]
+        vr = _aggregate(results, target_id=7)
+        total = sum(r.relative_probability for r in vr.scenario_results)
+        assert total == pytest.approx(1.0, abs=1e-10)
+
+    def test_relative_probs_sum_to_1_with_mix_of_inf(self) -> None:
+        """Mixed finite/-inf lnZ: finite scenarios split probability; sum still 1."""
+        results = [
+            _make_result(ScenarioID.TP, lnZ=0.0),
+            _make_result(ScenarioID.EB, lnZ=-np.inf),
+            _make_result(ScenarioID.PTP, lnZ=-1.0),
+        ]
+        vr = _aggregate(results, target_id=8)
+        total = sum(r.relative_probability for r in vr.scenario_results)
+        assert total == pytest.approx(1.0, abs=1e-10)
+
+
+class TestAggregateSingleDominantScenario:
+    def test_dominant_scenario_prob_near_1(self) -> None:
+        """One scenario with lnZ >> all others captures nearly all probability."""
+        results = [
+            _make_result(ScenarioID.TP, lnZ=100.0),   # dominant
+            _make_result(ScenarioID.EB, lnZ=-100.0),
+            _make_result(ScenarioID.PEB, lnZ=-200.0),
+        ]
+        vr = _aggregate(results, target_id=9)
+        tp = next(r for r in vr.scenario_results if r.scenario_id == ScenarioID.TP)
+        assert tp.relative_probability == pytest.approx(1.0, abs=1e-6)
+        for r in vr.scenario_results:
+            if r.scenario_id != ScenarioID.TP:
+                assert r.relative_probability == pytest.approx(0.0, abs=1e-6)
+        # FPP should be near 0 since TP dominates
+        assert vr.fpp == pytest.approx(0.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
 # Engine.compute tests
 # ---------------------------------------------------------------------------
 
