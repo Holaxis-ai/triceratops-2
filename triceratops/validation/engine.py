@@ -276,6 +276,20 @@ class ValidationEngine:
                 "Payload may be corrupted or incorrectly assembled."
             )
 
+        # Guard: scenario_ids must all be registered in this engine's registry.
+        # PreparedValidationInputs supports direct construction and deserialization,
+        # so we cannot rely on ValidationPreparer.prepare() having validated them.
+        # compute() resolves IDs with self._registry.get() which raises KeyError;
+        # we raise ValueError here instead with the unknown IDs named.
+        if prepared.scenario_ids is not None:
+            unknown = [sid for sid in prepared.scenario_ids if sid not in self._registry]
+            if unknown:
+                raise ValueError(
+                    f"PreparedValidationInputs.scenario_ids contains IDs not registered "
+                    f"in this engine's registry: {unknown}. "
+                    "Payload may be corrupted or assembled for a different registry."
+                )
+
         return self.compute(
             light_curve=prepared.light_curve,
             stellar_field=prepared.stellar_field,

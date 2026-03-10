@@ -405,6 +405,79 @@ class TestComputePreparedTargetIdGuard:
         assert str(stellar_field.target_id) in msg
 
 
+class TestComputePreparedScenarioIdsGuard:
+    """compute_prepared() must reject unregistered scenario_ids with a clear ValueError.
+
+    PreparedValidationInputs supports direct construction (job.py:43), so
+    compute_prepared() cannot rely on ValidationPreparer.prepare() having
+    validated the IDs.  compute() resolves IDs via self._registry.get() which
+    raises KeyError; compute_prepared() must raise ValueError with the IDs named.
+    """
+
+    def test_unregistered_id_raises_valueerror(
+        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
+    ) -> None:
+        from triceratops.domain.scenario_id import ScenarioID
+        from triceratops.validation.engine import ValidationEngine
+        from triceratops.validation.job import PreparedValidationInputs
+
+        engine = ValidationEngine()
+        pvi = PreparedValidationInputs(
+            target_id=stellar_field.target_id,
+            stellar_field=stellar_field,
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            scenario_ids=[ScenarioID.EBX2P],
+        )
+        with pytest.raises(ValueError, match="not registered"):
+            engine.compute_prepared(pvi)
+
+    def test_error_message_names_unknown_ids(
+        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
+    ) -> None:
+        from triceratops.domain.scenario_id import ScenarioID
+        from triceratops.validation.engine import ValidationEngine
+        from triceratops.validation.job import PreparedValidationInputs
+
+        engine = ValidationEngine()
+        pvi = PreparedValidationInputs(
+            target_id=stellar_field.target_id,
+            stellar_field=stellar_field,
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            scenario_ids=[ScenarioID.EBX2P, ScenarioID.DEBX2P],
+        )
+        with pytest.raises(ValueError) as exc_info:
+            engine.compute_prepared(pvi)
+        msg = str(exc_info.value)
+        assert "EBX2P" in msg or "EBx2P" in msg
+
+    def test_none_scenario_ids_passes_guard(
+        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
+    ) -> None:
+        """scenario_ids=None (run all) must not be rejected by the guard."""
+        from triceratops.validation.engine import ValidationEngine
+        from triceratops.validation.job import PreparedValidationInputs
+
+        engine = ValidationEngine()
+        pvi = PreparedValidationInputs(
+            target_id=stellar_field.target_id,
+            stellar_field=stellar_field,
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            scenario_ids=None,
+        )
+        # Should not raise ValueError from the scenario_ids guard
+        # (it may raise for other reasons like missing stellar_params, which is fine)
+        try:
+            engine.compute_prepared(pvi)
+        except ValueError as e:
+            assert "not registered" not in str(e), f"Guard fired unexpectedly: {e}"
+
+
 class TestPreparerExternalLcLengthGuard:
     """ValidationPreparer.prepare() must reject mismatched external_lc_files / filt_lcs."""
 
