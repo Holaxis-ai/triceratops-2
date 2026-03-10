@@ -212,6 +212,48 @@ class TestPackBestIndices:
         idx = pack_best_indices(lnL, 10)
         assert len(idx) == 3
 
+    def test_ties_in_lnL_returns_k_indices(self) -> None:
+        """Multiple draws with identical max lnL: top-k returns exactly k indices."""
+        lnL = np.array([5.0, 5.0, 5.0, 1.0, 2.0])
+        k = 3
+        idx = pack_best_indices(lnL, k)
+        assert len(idx) == k
+        # All returned indices must have the max value
+        assert all(lnL[i] == 5.0 for i in idx)
+
+    def test_ties_all_at_max_returns_any_k(self) -> None:
+        """All values identical: any k indices are acceptable."""
+        lnL = np.full(10, 7.0)
+        k = 4
+        idx = pack_best_indices(lnL, k)
+        assert len(idx) == k
+        assert all(lnL[i] == 7.0 for i in idx)
+
+    def test_k_equals_1_returns_single_best(self) -> None:
+        """k=1 returns exactly the index of the maximum lnL."""
+        lnL = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        idx = pack_best_indices(lnL, 1)
+        assert len(idx) == 1
+        assert idx[0] == 3  # index of max (5.0)
+
+    def test_k_equals_len_returns_all_sorted_descending(self) -> None:
+        """k=len(lnL): returns all indices sorted descending by lnL."""
+        lnL = np.array([3.0, 1.0, 4.0, 1.5, 2.0])
+        idx = pack_best_indices(lnL, len(lnL))
+        assert len(idx) == len(lnL)
+        # Values at returned indices must be non-increasing
+        values = lnL[idx]
+        assert all(values[i] >= values[i + 1] for i in range(len(values) - 1))
+
+    def test_output_sorted_descending_by_lnL(self) -> None:
+        """Returned indices are in descending lnL order."""
+        lnL = np.array([2.0, 9.0, 4.0, 7.0, 1.0, 6.0])
+        k = 4
+        idx = pack_best_indices(lnL, k)
+        assert len(idx) == k
+        values = lnL[idx]
+        assert all(values[i] >= values[i + 1] for i in range(len(values) - 1))
+
 
 # ---------------------------------------------------------------------------
 # load_external_lcs
