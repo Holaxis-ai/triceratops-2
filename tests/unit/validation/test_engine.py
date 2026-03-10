@@ -800,6 +800,119 @@ class TestTrilegalLoading:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2: Engine provider-free guarantees
+# ---------------------------------------------------------------------------
+
+class TestEngineProviderFreePhase2:
+    """Phase 2 guarantees: engine.compute() works correctly with direct trilegal_population.
+
+    These tests are the explicit Phase 2 regression guard.  They verify:
+    1. compute() works when trilegal_population is passed directly.
+    2. compute() works when trilegal_population=None.
+    3. The engine never calls any provider during compute().
+    """
+
+    class _BoomProvider:
+        def query(self, **kwargs: object) -> object:
+            raise AssertionError("engine must not call providers during compute()")
+        def query_nearby_stars(self, **kwargs: object) -> object:
+            raise AssertionError("engine must not call providers during compute()")
+
+    @pytest.fixture()
+    def sf(self):
+        target = Star(
+            tic_id=55555,
+            ra_deg=45.0, dec_deg=-10.0,
+            tmag=10.0, jmag=9.3, hmag=9.1, kmag=9.0,
+            bmag=10.8, vmag=10.5,
+            stellar_params=StellarParameters(
+                mass_msun=0.9, radius_rsun=0.9, teff_k=5400.0,
+                logg=4.5, metallicity_dex=0.0, parallax_mas=8.0,
+            ),
+        )
+        return StellarField(target_id=55555, mission="TESS", search_radius_pixels=10, stars=[target])
+
+    @pytest.fixture()
+    def lc(self):
+        return LightCurve(
+            time_days=np.linspace(-0.1, 0.1, 40),
+            flux=np.ones(40),
+            flux_err=0.001,
+        )
+
+    @pytest.fixture()
+    def cfg(self):
+        return Config(n_mc_samples=100, n_best_samples=10)
+
+    @pytest.fixture()
+    def fake_trilegal(self):
+        from triceratops.population.protocols import TRILEGALResult
+        return TRILEGALResult(
+            tmags=np.array([14.0]),
+            masses=np.array([0.5]),
+            loggs=np.array([4.5]),
+            teffs=np.array([4000.0]),
+            metallicities=np.array([0.0]),
+            jmags=np.array([13.0]),
+            hmags=np.array([12.8]),
+            kmags=np.array([12.7]),
+            gmags=np.array([15.0]),
+            rmags=np.array([14.5]),
+            imags=np.array([14.2]),
+            zmags=np.array([14.0]),
+        )
+
+    def test_compute_with_trilegal_passed_directly(self, sf, lc, cfg, fake_trilegal) -> None:
+        """compute() works when trilegal_population is passed directly (no provider needed)."""
+        result = _make_result(ScenarioID.DTP, lnZ=-1.0)
+        registry = ScenarioRegistry()
+        registry.register(_FakeScenario(ScenarioID.DTP, False, result))
+
+        engine = ValidationEngine(
+            registry=registry,
+            catalog_provider=self._BoomProvider(),
+            population_provider=self._BoomProvider(),
+        )
+        vr = engine.compute(
+            lc, sf, period_days=5.0, config=cfg,
+            trilegal_population=fake_trilegal,
+        )
+        assert isinstance(vr, ValidationResult)
+        assert 0.0 <= vr.fpp <= 1.0
+
+    def test_compute_with_trilegal_none_does_not_crash(self, sf, lc, cfg) -> None:
+        """compute() with trilegal_population=None and no provider — no crash."""
+        result = _make_result(ScenarioID.TP, lnZ=0.0)
+        registry = ScenarioRegistry()
+        registry.register(_FakeScenario(ScenarioID.TP, False, result))
+
+        engine = ValidationEngine(registry=registry, population_provider=None)
+        vr = engine.compute(
+            lc, sf, period_days=5.0, config=cfg,
+            trilegal_population=None,
+        )
+        assert isinstance(vr, ValidationResult)
+
+    def test_compute_never_calls_provider(self, sf, lc, cfg, fake_trilegal) -> None:
+        """Provider injected into engine constructor must never be called during compute()."""
+        result = _make_result(ScenarioID.BTP, lnZ=-2.0)
+        registry = ScenarioRegistry()
+        registry.register(_FakeScenario(ScenarioID.BTP, False, result))
+
+        engine = ValidationEngine(
+            registry=registry,
+            catalog_provider=self._BoomProvider(),
+            population_provider=self._BoomProvider(),
+        )
+        # Should not raise — provider must never be called
+        vr = engine.compute(
+            lc, sf, period_days=5.0, config=cfg,
+            trilegal_population=fake_trilegal,
+        )
+        assert isinstance(vr, ValidationResult)
+
+
+# ---------------------------------------------------------------------------
 # n_workers cap at scenario count
 # ---------------------------------------------------------------------------
 
