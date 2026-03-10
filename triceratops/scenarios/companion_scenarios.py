@@ -373,7 +373,8 @@ class PTPScenario(BaseScenario):
         lnZ = compute_lnZ(lnL + lnprior_comp, config.lnz_const)
 
         n_best = config.n_best_samples
-        idx = pack_best_indices(lnL, n_best)
+        # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
+        idx = pack_best_indices(lnL + lnprior_comp, n_best)
         return self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
             resolved_ext_lcs,
@@ -803,13 +804,15 @@ class PEBScenario(BaseScenario):
         lnZ_twin = compute_lnZ(lnL_twin + lnprior_comp, config.lnz_const)
 
         n_best = config.n_best_samples
-        idx = pack_best_indices(lnL, n_best)
+        # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
+        idx = pack_best_indices(lnL + lnprior_comp, n_best)
         result = self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
             resolved_ext_lcs, twin=False,
         )
 
-        idx_twin = pack_best_indices(lnL_twin, n_best)
+        # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
+        idx_twin = pack_best_indices(lnL_twin + lnprior_comp, n_best)
         result_twin = self._pack_result(
             samples, geometry, ldc, lnZ_twin, idx_twin, stellar_params,
             resolved_ext_lcs, twin=True,
@@ -1167,7 +1170,8 @@ class STPScenario(BaseScenario):
         lnZ = compute_lnZ(lnL + lnprior_comp, config.lnz_const)
 
         n_best = config.n_best_samples
-        idx = pack_best_indices(lnL, n_best)
+        # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
+        idx = pack_best_indices(lnL + lnprior_comp, n_best)
         return self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
             resolved_ext_lcs,
@@ -1594,13 +1598,15 @@ class SEBScenario(BaseScenario):
         lnZ_twin = compute_lnZ(lnL_twin + lnprior_comp, config.lnz_const)
 
         n_best = config.n_best_samples
-        idx = pack_best_indices(lnL, n_best)
+        # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
+        idx = pack_best_indices(lnL + lnprior_comp, n_best)
         result = self._pack_result(
             samples, geometry, ldc, lnZ, idx, stellar_params,
             resolved_ext_lcs, twin=False,
         )
 
-        idx_twin = pack_best_indices(lnL_twin, n_best)
+        # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
+        idx_twin = pack_best_indices(lnL_twin + lnprior_comp, n_best)
         result_twin = self._pack_result(
             samples, geometry, ldc, lnZ_twin, idx_twin, stellar_params,
             resolved_ext_lcs, twin=True,
