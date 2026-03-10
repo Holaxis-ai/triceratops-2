@@ -165,6 +165,26 @@ class TestWorkspaceMissionGate:
         with pytest.raises(UnsupportedComputeModeError):
             ws.compute_probs(_lc(), period_days=5.0)
 
+    def test_field_mission_is_checked_not_construction_arg(self) -> None:
+        """Gate uses stellar_field.mission; a TESS-arg workspace with a
+        Kepler-returning provider must still be rejected."""
+        from unittest.mock import MagicMock
+        from triceratops.validation.workspace import ValidationWorkspace
+
+        catalog = MagicMock()
+        # Provider returns a Kepler field even though mission="TESS" was passed
+        catalog.query_nearby_stars.return_value = _field(mission="Kepler")
+
+        ws = ValidationWorkspace(
+            tic_id=12345,
+            sectors=np.array([1]),
+            mission="TESS",          # construction arg says TESS...
+            catalog_provider=catalog,
+        )
+        # ...but the assembled field says Kepler — must be rejected
+        with pytest.raises(UnsupportedComputeModeError):
+            ws.compute_probs(_lc(), period_days=5.0)
+
 
 # ---------------------------------------------------------------------------
 # Prep boundary: ValidationPreparer.prepare()
@@ -264,3 +284,33 @@ class TestPrepBoundaryMissionGate:
             )
 
         catalog.query_nearby_stars.assert_not_called()
+
+    def test_provider_returning_wrong_mission_field_is_rejected(self) -> None:
+        """If the catalog returns a Kepler field despite mission='TESS' being passed,
+        the field-level mission check catches it before TRILEGAL fetch."""
+        from unittest.mock import MagicMock
+        from triceratops.validation.preparer import ValidationPreparer
+
+        catalog = MagicMock()
+        # Provider returns a Kepler field even though TESS was requested
+        catalog.query_nearby_stars.return_value = _field(mission="Kepler")
+        population = MagicMock()
+
+        preparer = ValidationPreparer(
+            catalog_provider=catalog,
+            population_provider=population,
+        )
+        with pytest.raises(UnsupportedComputeModeError) as exc_info:
+            preparer.prepare(
+                target_id=12345,
+                sectors=np.array([1]),
+                light_curve=_lc(),
+                config=_cfg(),
+                period_days=5.0,
+                mission="TESS",
+                scenario_ids=[],
+            )
+        # Error names the field mission, not the argument
+        assert "Kepler" in str(exc_info.value)
+        # TRILEGAL was never fetched
+        population.query.assert_not_called()

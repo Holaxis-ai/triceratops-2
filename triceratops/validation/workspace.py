@@ -182,13 +182,15 @@ class ValidationWorkspace:
         from triceratops.validation.job import PreparedValidationInputs
 
         # Mission gate — fail before any provider IO.
-        # validate() on the payload would catch this too, but that fires after
-        # TRILEGAL may already have been fetched.  Check here so non-TESS calls
-        # never trigger avoidable network/filesystem work.
-        if self.mission != "TESS":
+        # Check stellar_field.mission (the actual assembled field) rather than
+        # self.mission (the construction argument) so this gate uses the same
+        # source as the compute boundary in PreparedValidationInputs.validate().
+        # A misbehaving catalog provider that returns the wrong mission would
+        # otherwise bypass a self.mission check and only be caught at compute time.
+        if self._stellar_field.mission != "TESS":
             raise UnsupportedComputeModeError(
                 f"compute_probs() only supports mission='TESS'. "
-                f"This workspace was constructed with mission={self.mission!r}. "
+                f"Stellar field has mission={self._stellar_field.mission!r}. "
                 "Kepler/K2 support is experimental and not available for "
                 "prepared compute jobs."
             )

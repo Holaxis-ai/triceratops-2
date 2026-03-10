@@ -180,6 +180,19 @@ class ValidationPreparer:
         # downstream IO (TRILEGAL fetch, file loads).
         stellar_field.validate()
 
+        # Mission integrity check on the returned field — the catalog provider
+        # is the authoritative source of stellar_field.mission and may disagree
+        # with the requested mission argument (misbehaving stub or real provider).
+        # This check uses the same source (stellar_field.mission) as the compute
+        # boundary in PreparedValidationInputs.validate(), so both layers are
+        # consistent even if the field is assembled by a custom provider.
+        if stellar_field.mission != "TESS":
+            from triceratops.validation.errors import UnsupportedComputeModeError
+            raise UnsupportedComputeModeError(
+                f"Catalog query returned a field with mission={stellar_field.mission!r}. "
+                "Prepared compute only supports mission='TESS'."
+            )
+
         # ---- 3. Flux ratios and transit depths (if depth data provided) ----
         if (
             transit_depth is not None
