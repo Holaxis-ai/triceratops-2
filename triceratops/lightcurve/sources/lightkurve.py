@@ -202,21 +202,16 @@ class LightkurveSource:
 
     @staticmethod
     def _extract_sectors(lc_coll: Any, stitched: Any) -> tuple[int, ...]:
-        sectors: set[int] = set()
-        for individual_lc in lc_coll:
-            sector = individual_lc.meta.get("SECTOR")
-            if sector is not None:
-                sectors.add(int(sector))
-        if not sectors:
-            meta_sectors = stitched.meta.get("SECTOR")
-            if meta_sectors is not None:
-                if isinstance(meta_sectors, (list, tuple)):
-                    sectors.update(int(s) for s in meta_sectors)
-                else:
-                    sectors.add(int(meta_sectors))
-        if not sectors:
-            sectors.add(0)
-        return tuple(sorted(sectors))
+        raw = lc_coll.sector  # numpy array, np.nan for missing
+        valid = raw[~np.isnan(raw)]
+        if len(valid) > 0:
+            return tuple(sorted(int(s) for s in valid))
+        meta_sectors = stitched.meta.get("SECTOR")
+        if meta_sectors is not None:
+            if isinstance(meta_sectors, (list, tuple)):
+                return tuple(sorted(int(s) for s in meta_sectors))
+            return (int(meta_sectors),)
+        return (0,)
 
     @staticmethod
     def _resolve_cadence(stitched: Any, config_cadence: str) -> str:
