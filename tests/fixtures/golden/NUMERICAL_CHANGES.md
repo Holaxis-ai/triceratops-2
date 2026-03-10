@@ -155,8 +155,14 @@ probability mass)
 
 ### Affected scenarios
 
-BTP, BEB, BEBx2P, DTP — the four scenarios whose priors call
-`lnprior_background()` or its inline equivalent.
+BTP, BEB, BEBx2P, DTP, DEB, DEBx2P — the six scenarios whose priors call
+`lnprior_background()` or its inline equivalent via `_compute_lnprior_companion()`.
+
+DEB and DEBx2P are affected because they use `_compute_lnprior_companion()`,
+which calls `lnprior_background()` (when a contrast curve is present) or uses
+the same inline `np.log10` formula (without contrast curve).  The no-contrast
+path in `_compute_lnprior_companion()` was also corrected from `np.log10` to
+`np.log`.
 
 ### The bug
 
@@ -199,8 +205,8 @@ at the commit that applies this fix.
 ### Call sites
 
 - `triceratops/priors/lnpriors.py` — `lnprior_background()`, line ~378
-- `triceratops/scenarios/background_scenarios.py` — BTPScenario prior fallback
-- `triceratops/scenarios/background_scenarios.py` — BEBScenario prior fallback
+- `triceratops/scenarios/background_scenarios.py` — `_compute_lnprior_companion()` no-contrast fallback (DTP, DEB, DEBx2P)
+- `triceratops/scenarios/background_scenarios.py` — `_compute_bright_background_lnprior()` no-contrast fallback (BTP, BEB, BEBx2P)
 
 ---
 

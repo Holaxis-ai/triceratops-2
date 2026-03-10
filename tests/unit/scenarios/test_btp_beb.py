@@ -308,7 +308,7 @@ class TestBrightBackgroundParity:
             + (fluxratios_eb / (1 - fluxratios_eb))
         )
         expected = np.full(
-            2, np.log10((50 / 0.1) * (1 / 3600) ** 2 * 2.2**2),
+            2, np.log((50 / 0.1) * (1 / 3600) ** 2 * 2.2**2),
         )
         expected[expected > 0.0] = 0.0
         expected[delta_mags > 0.0] = -np.inf
