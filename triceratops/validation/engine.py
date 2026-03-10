@@ -11,7 +11,9 @@ NFPP formula:
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
@@ -20,7 +22,54 @@ from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, St
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import ContrastCurve
+from triceratops.scenarios.base import Scenario
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
+
+
+def _worker_initializer() -> None:
+    """Limit BLAS/OMP threads to 1 per worker process.
+
+    Called once per worker at startup by ProcessPoolExecutor.  Without this,
+    each worker inherits the parent's thread settings and all workers compete
+    for the same CPU cores (oversubscription), which *reduces* throughput.
+    With 1 BLAS thread per worker, scenario-level parallelism is clean.
+    """
+    import os
+    for var in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        os.environ[var] = "1"
+
+
+def _scenario_worker(
+    scenario: Scenario,
+    light_curve: LightCurve,
+    stellar_params: object,
+    period_days: float | list[float],
+    config: Config,
+    external_lcs: list[ExternalLightCurve] | None,
+    kwargs: dict,
+) -> ScenarioResult | tuple[ScenarioResult, ScenarioResult]:
+    """Top-level worker function for ProcessPoolExecutor.
+
+    Must be module-level (not a closure or lambda) to be picklable under
+    spawn-mode multiprocessing (default on macOS / Windows).
+
+    Each worker process receives an independent OS-entropy RNG seed on spawn,
+    so no explicit np.random.seed() call is needed for correctness.
+    """
+    return scenario.compute(
+        light_curve=light_curve,
+        stellar_params=stellar_params,
+        period_days=period_days,
+        config=config,
+        external_lcs=external_lcs,
+        **kwargs,
+    )
 
 
 class ValidationEngine:
@@ -107,44 +156,59 @@ class ValidationEngine:
             light_curve, target_flux_ratio,
         )
 
+        stellar_params = stellar_field.target.stellar_params
+        if stellar_params is None:
+            return self._aggregate([], stellar_field.target_id)
+
+        filt = contrast_curve.band if contrast_curve is not None else None
+        shared_kwargs: dict = {
+            "contrast_curve": contrast_curve,
+            "filt": filt,
+            "molusc_file": molusc_file,
+            "trilegal_population": trilegal_population,
+            "host_magnitudes": host_magnitudes,
+            "external_lc_bands": tuple(
+                ext_lc.band for ext_lc in (external_lcs or [])
+            ),
+            "target_tmag": stellar_field.target.tmag,
+        }
+
+        nearby_ids = ScenarioID.nearby_scenarios()
+        tasks = [
+            (
+                scenario,
+                light_curve if scenario.scenario_id in nearby_ids else renormed_target_lc,
+                stellar_params,
+                period_days,
+                config,
+                external_lcs,
+                shared_kwargs,
+            )
+            for scenario in scenarios_to_run
+        ]
+
         all_results: list[ScenarioResult] = []
-        for scenario in scenarios_to_run:
-            stellar_params = stellar_field.target.stellar_params
-            if stellar_params is None:
-                continue
-
-            filt = contrast_curve.band if contrast_curve is not None else None
-            kwargs: dict = {
-                "contrast_curve": contrast_curve,
-                "filt": filt,
-                "molusc_file": molusc_file,
-                "trilegal_population": trilegal_population,
-                "host_magnitudes": host_magnitudes,
-                "external_lc_bands": tuple(
-                    ext_lc.band for ext_lc in (external_lcs or [])
-                ),
-                "target_tmag": stellar_field.target.tmag,
-            }
-
-            scenario_lc = (
-                renormed_target_lc
-                if scenario.scenario_id not in ScenarioID.nearby_scenarios()
-                else light_curve
+        if config.n_workers == 0:
+            for task in tasks:
+                result_or_tuple = _scenario_worker(*task)
+                if isinstance(result_or_tuple, tuple):
+                    all_results.extend(result_or_tuple)
+                else:
+                    all_results.append(result_or_tuple)
+        else:
+            n_workers = (
+                min(len(tasks), os.cpu_count() or 1)
+                if config.n_workers < 0
+                else min(config.n_workers, len(tasks))
             )
-
-            result_or_tuple = scenario.compute(
-                light_curve=scenario_lc,
-                stellar_params=stellar_params,
-                period_days=period_days,
-                config=config,
-                external_lcs=external_lcs,
-                **kwargs,
-            )
-
-            if isinstance(result_or_tuple, tuple):
-                all_results.extend(result_or_tuple)
-            else:
-                all_results.append(result_or_tuple)
+            with ProcessPoolExecutor(max_workers=n_workers, initializer=_worker_initializer) as pool:
+                futures = [pool.submit(_scenario_worker, *task) for task in tasks]
+                for future in futures:
+                    result_or_tuple = future.result()
+                    if isinstance(result_or_tuple, tuple):
+                        all_results.extend(result_or_tuple)
+                    else:
+                        all_results.append(result_or_tuple)
 
         return self._aggregate(all_results, stellar_field.target_id)
 

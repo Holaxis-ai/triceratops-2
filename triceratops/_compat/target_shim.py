@@ -163,6 +163,7 @@ class target:
         filt: str | None = None,
         molusc_file: str | None = None,
         trilegal_fname: str | None = None,  # noqa: ARG002
+        n_workers: int = 0,
     ) -> None:
         """Run validation and populate self.probs, self.FPP, self.NFPP.
 
@@ -177,6 +178,7 @@ class target:
             parallel=parallel,
             flat_priors=flat_priors,
             mission=self.mission,
+            n_workers=n_workers,
         )
         self._workspace.config = config
 

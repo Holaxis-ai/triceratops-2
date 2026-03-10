@@ -127,6 +127,19 @@ class Config:
     parallel: bool = True
     flat_priors: bool = False
     mission: str = "TESS"
+    n_workers: int = 0
+    """Number of worker processes for scenario-level parallelism.
+
+    0  — serial execution (default; fully reproducible with np.random.seed).
+    -1 — one worker per scenario up to os.cpu_count().
+    N  — exactly N worker processes.
+
+    Note: parallel workers each receive an independent OS-entropy RNG seed.
+    For fully reproducible parallel runs pass an explicit seed via
+    np.random.seed() before calling calc_probs with n_workers=0, or use
+    n_workers=0 and rely on Config.parallel=True for intra-scenario
+    vectorisation.
+    """
 
     def __post_init__(self) -> None:
         if self.n_mc_samples < 1:
@@ -140,6 +153,8 @@ class Config:
             )
         if self.mission not in ("TESS", "Kepler", "K2"):
             raise ValueError(f"Unknown mission {self.mission!r}")
+        if self.n_workers < -1:
+            raise ValueError(f"n_workers must be >= -1, got {self.n_workers}")
 
     @property
     def mission_config(self) -> MissionConfig:
