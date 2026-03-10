@@ -281,7 +281,7 @@ class ValidationEngine:
             stellar_field=prepared.stellar_field,
             period_days=prepared.period_days,
             config=prepared.config,
-            scenario_ids=None,
+            scenario_ids=prepared.scenario_ids,
             external_lcs=prepared.external_lcs,
             contrast_curve=prepared.contrast_curve,
             trilegal_population=prepared.trilegal_population,

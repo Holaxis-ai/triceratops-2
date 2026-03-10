@@ -242,4 +242,5 @@ class ValidationPreparer:
             external_lcs=external_lcs,
             contrast_curve=contrast_curve,
             molusc_file=molusc_file,
+            scenario_ids=scenario_ids,
         )

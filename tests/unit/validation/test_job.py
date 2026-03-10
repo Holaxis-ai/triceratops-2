@@ -630,3 +630,88 @@ class TestPreparerTrilegalScenarioGate:
             scenario_ids=None,
         )
         mock_pop.query.assert_called_once()
+
+
+class TestPrepareComputeScenarioContract:
+    """scenario_ids must flow from prepare() through the payload into compute_prepared().
+
+    Regression guard: the original fix gated TRILEGAL fetch in the preparer but
+    hardcoded scenario_ids=None in compute_prepared(), breaking the contract —
+    a caller could prepare for [TP] (no TRILEGAL), hand the payload to
+    compute_prepared(), and get BTP/BEB run against a None trilegal_population.
+    """
+
+    def test_scenario_ids_stored_on_payload(self, lc: LightCurve, cfg: Config) -> None:
+        """prepare(scenario_ids=X) must store X on the returned PreparedValidationInputs."""
+        import numpy as np
+        from unittest.mock import MagicMock
+        from triceratops.domain.scenario_id import ScenarioID
+        from triceratops.domain.value_objects import StellarParameters
+        from triceratops.validation.preparer import ValidationPreparer
+
+        star = Star(
+            tic_id=7777,
+            ra_deg=0.0, dec_deg=0.0,
+            tmag=10.0, jmag=9.5, hmag=9.3, kmag=9.2,
+            bmag=10.5, vmag=10.2,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5500.0,
+                logg=4.4, metallicity_dex=0.0, parallax_mas=10.0,
+            ),
+            flux_ratio=1.0,
+            transit_depth_required=0.01,
+        )
+        sf = StellarField(target_id=7777, mission="TESS", search_radius_pixels=10, stars=[star])
+        mock_catalog = MagicMock()
+        mock_catalog.query_nearby_stars.return_value = sf
+        preparer = ValidationPreparer(catalog_provider=mock_catalog)
+
+        ids = [ScenarioID.TP, ScenarioID.EB]
+        payload = preparer.prepare(
+            target_id=7777,
+            sectors=np.array([1]),
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            scenario_ids=ids,
+        )
+        assert payload.scenario_ids == ids
+
+    def test_compute_prepared_passes_scenario_ids_to_engine(
+        self, lc: LightCurve, cfg: Config
+    ) -> None:
+        """compute_prepared() must call compute(scenario_ids=prepared.scenario_ids), not None."""
+        from unittest.mock import MagicMock, patch
+        from triceratops.domain.scenario_id import ScenarioID
+        from triceratops.domain.value_objects import StellarParameters
+        from triceratops.validation.engine import ValidationEngine
+        from triceratops.validation.job import PreparedValidationInputs
+
+        star = Star(
+            tic_id=8888,
+            ra_deg=0.0, dec_deg=0.0,
+            tmag=10.0, jmag=9.5, hmag=9.3, kmag=9.2,
+            bmag=10.5, vmag=10.2,
+            stellar_params=StellarParameters(
+                mass_msun=1.0, radius_rsun=1.0, teff_k=5500.0,
+                logg=4.4, metallicity_dex=0.0, parallax_mas=10.0,
+            ),
+            flux_ratio=1.0,
+            transit_depth_required=0.01,
+        )
+        sf = StellarField(target_id=8888, mission="TESS", search_radius_pixels=10, stars=[star])
+
+        ids = [ScenarioID.TP]
+        payload = PreparedValidationInputs(
+            target_id=8888,
+            stellar_field=sf,
+            light_curve=lc,
+            config=cfg,
+            period_days=5.0,
+            scenario_ids=ids,
+        )
+        engine = ValidationEngine()
+        with patch.object(engine, "compute", wraps=engine.compute) as mock_compute:
+            engine.compute_prepared(payload)
+        call_kwargs = mock_compute.call_args
+        assert call_kwargs.kwargs["scenario_ids"] == ids

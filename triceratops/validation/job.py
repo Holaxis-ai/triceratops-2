@@ -30,9 +30,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from collections.abc import Sequence
+
 if TYPE_CHECKING:
     from triceratops.config.config import Config
     from triceratops.domain.entities import ExternalLightCurve, LightCurve, StellarField
+    from triceratops.domain.scenario_id import ScenarioID
     from triceratops.domain.value_objects import ContrastCurve
     from triceratops.population.protocols import TRILEGALResult
 
@@ -72,6 +75,11 @@ class PreparedValidationInputs:
         The compute boundary is not fully clean for this field until Phase 4,
         when remote execution requires the content to be embedded rather than
         referenced by path.  Deferred to Phase 4.
+    scenario_ids:
+        The scenario subset that was prepared for.  ``None`` means the full
+        default registry.  ``compute_prepared()`` passes this directly to
+        ``compute(scenario_ids=...)``, keeping the prepare/compute contract
+        consistent: the engine runs exactly the scenarios that were prepared.
     """
 
     target_id: int
@@ -83,6 +91,7 @@ class PreparedValidationInputs:
     external_lcs: list[ExternalLightCurve] | None = None
     contrast_curve: ContrastCurve | None = None
     molusc_file: str | None = None  # local path — not yet materialised; deferred to Phase 4
+    scenario_ids: Sequence[ScenarioID] | None = None  # None → run full default registry
 
 
 @dataclass
