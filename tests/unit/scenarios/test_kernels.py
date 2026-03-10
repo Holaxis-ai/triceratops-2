@@ -47,6 +47,46 @@ class TestResolvePeriod:
         with pytest.raises(ValueError, match="exactly 2 elements"):
             resolve_period([1.0], 100)
 
+    def test_zero_period_scalar(self) -> None:
+        """Zero period scalar: returns array of zeros (no raise expected)."""
+        result = resolve_period(0.0, 50)
+        assert result.shape == (50,)
+        np.testing.assert_array_equal(result, 0.0)
+
+    def test_negative_period_scalar(self) -> None:
+        """Negative scalar period: silently returns negative array (no raise)."""
+        result = resolve_period(-1.0, 50)
+        assert result.shape == (50,)
+        np.testing.assert_array_equal(result, -1.0)
+
+    def test_period_min_equals_period_max(self) -> None:
+        """[5.0, 5.0] range: uniform sample from [5,5) => constant 5.0."""
+        result = resolve_period([5.0, 5.0], 200)
+        assert result.shape == (200,)
+        np.testing.assert_array_equal(result, 5.0)
+
+    def test_large_range_within_bounds(self) -> None:
+        """Large range [0.1, 1000.0]: all N=10000 draws stay within bounds."""
+        result = resolve_period([0.1, 1000.0], 10000)
+        assert result.shape == (10000,)
+        assert np.all(result >= 0.1)
+        assert np.all(result <= 1000.0)
+
+    def test_two_element_list_draws_in_range(self) -> None:
+        """[1.0, 2.0]: draws in [1.0, 2.0)."""
+        result = resolve_period([1.0, 2.0], 5000)
+        assert result.shape == (5000,)
+        assert np.all(result >= 1.0)
+        assert np.all(result < 2.0)
+
+    def test_tuple_same_as_list(self) -> None:
+        """Tuple (1.0, 2.0) behaves identically to list [1.0, 2.0]."""
+        np.random.seed(0)
+        result_list = resolve_period([1.0, 2.0], 500)
+        np.random.seed(0)
+        result_tuple = resolve_period((1.0, 2.0), 500)
+        np.testing.assert_array_equal(result_list, result_tuple)
+
 
 # ---------------------------------------------------------------------------
 # compute_lnZ
