@@ -11,6 +11,12 @@ the unresolved companion.
 
 Source: marginal_likelihoods.py:674-913 (PTP), 916-1294 (PEB),
         1296-1614 (STP), 1617-2056 (SEB).
+
+BUG-07 fix (commit ac244189): companion scenario compute() overrides now rank
+best-fit samples by lnL + lnprior_comp (posterior score) rather than raw lnL.
+The original TRICERATOPS-PLUS code used raw lnL for sample selection while
+correctly using lnL + lnprior_companion for evidence. See
+working_docs/Original_bugs/BUG-07_companion_best_sample_ranking.md.
 """
 # ruff: noqa: ARG002  -- ABC override signatures require unused params
 from __future__ import annotations
