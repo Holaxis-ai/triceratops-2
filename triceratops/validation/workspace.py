@@ -68,10 +68,30 @@ class ValidationWorkspace:
         self._population_provider = population_provider
 
         # Fire catalog query during construction (matches original target.__init__)
-        self._stellar_field: StellarField = self._catalog_provider.query_nearby_stars(
+        from triceratops.assembly.config import AssemblyConfig
+        from triceratops.assembly.pipelines.stellar_field import assemble_stellar_field
+        from triceratops.lightcurve.ephemeris import ResolvedTarget
+
+        _init_target = ResolvedTarget(
+            target_ref=str(tic_id),
             tic_id=tic_id,
-            search_radius_px=search_radius,
+            ephemeris=None,
+            source="workspace",
+        )
+        _init_config = AssemblyConfig(
             mission=mission,
+            catalog_search_radius_px=search_radius,
+            include_light_curve=False,
+        )
+        self._stellar_field: StellarField
+        self._stellar_field, _ = assemble_stellar_field(
+            catalog_provider=catalog_provider,
+            target=_init_target,
+            config=_init_config,
+            transit_depth=None,
+            pixel_coords_per_sector=None,
+            aperture_pixels_per_sector=None,
+            sigma_psf_px=0.75,
         )
 
         self._last_result: ValidationResult | None = None

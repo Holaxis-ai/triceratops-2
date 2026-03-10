@@ -8,6 +8,7 @@ import pytest
 
 from triceratops.assembly import AssembledInputs, AssemblyConfig, AssemblyMetadata
 from triceratops.assembly.errors import (
+    AssemblyConfigError,
     AssemblyLightCurveError,
     CatalogAcquisitionError,
 )
@@ -276,9 +277,10 @@ class TestAssembleBasic:
         catalog = StubCatalogProvider()
         orch = DataAssemblyOrchestrator(catalog_provider=catalog)
         target = _make_resolved_target()
-        # config=None should work, using AssemblyConfig defaults
-        result = orch.assemble(target, config=None)
-        assert isinstance(result, AssembledInputs)
+        # config=None uses AssemblyConfig defaults; default require_light_curve
+        # is True so we must expect the error when no lc_source is provided.
+        with pytest.raises(AssemblyLightCurveError, match="require_light_curve"):
+            orch.assemble(target, config=None)
 
 
 # ---------------------------------------------------------------------------
@@ -560,11 +562,103 @@ class TestAssembleLightCurve:
         assert result.light_curve is None
 
     def test_lc_not_assembled_when_no_source(self) -> None:
-        """No lc_source injected means no LC assembly even if enabled."""
+        """No lc_source injected means no LC assembly even if enabled;
+        with require_light_curve=True (default), this now raises."""
         catalog = StubCatalogProvider()
         orch = DataAssemblyOrchestrator(catalog_provider=catalog)
         target = _make_resolved_target(with_ephemeris=True)
         config = AssemblyConfig(include_light_curve=True)
+
+        with pytest.raises(AssemblyLightCurveError, match="require_light_curve"):
+            orch.assemble(target, config)
+
+    def test_lc_not_assembled_when_no_source_and_not_required(self) -> None:
+        """No lc_source with require_light_curve=False should return None."""
+        catalog = StubCatalogProvider()
+        orch = DataAssemblyOrchestrator(catalog_provider=catalog)
+        target = _make_resolved_target(with_ephemeris=True)
+        config = AssemblyConfig(include_light_curve=True, require_light_curve=False)
+
+        result = orch.assemble(target, config)
+        assert result.light_curve is None
+
+
+# ---------------------------------------------------------------------------
+# scenario_ids early validation
+# ---------------------------------------------------------------------------
+
+
+class TestAssembleScenarioIdValidation:
+    def test_unknown_scenario_id_raises_before_io(self) -> None:
+        """Unknown scenario IDs must raise AssemblyConfigError before catalog I/O."""
+        catalog = StubCatalogProvider()
+        registry = _make_non_trilegal_registry()  # only has TP
+        orch = DataAssemblyOrchestrator(
+            catalog_provider=catalog,
+            registry=registry,
+        )
+        target = _make_resolved_target()
+        config = AssemblyConfig(include_light_curve=False)
+
+        with pytest.raises(AssemblyConfigError, match="Unknown scenario IDs"):
+            orch.assemble(target, config, scenario_ids=[ScenarioID.BTP])
+
+        # Catalog must NOT have been called
+        assert catalog.call_count == 0
+
+    def test_valid_scenario_ids_pass_validation(self) -> None:
+        """Known scenario IDs should not raise."""
+        catalog = StubCatalogProvider()
+        registry = _make_non_trilegal_registry()  # has TP
+        orch = DataAssemblyOrchestrator(
+            catalog_provider=catalog,
+            registry=registry,
+        )
+        target = _make_resolved_target()
+        config = AssemblyConfig(include_light_curve=False)
+
+        result = orch.assemble(target, config, scenario_ids=[ScenarioID.TP])
+        assert isinstance(result, AssembledInputs)
+
+    def test_none_scenario_ids_skips_validation(self) -> None:
+        """scenario_ids=None should not trigger validation."""
+        catalog = StubCatalogProvider()
+        orch = DataAssemblyOrchestrator(catalog_provider=catalog)
+        target = _make_resolved_target()
+        config = AssemblyConfig(include_light_curve=False)
+
+        result = orch.assemble(target, config, scenario_ids=None)
+        assert isinstance(result, AssembledInputs)
+
+
+# ---------------------------------------------------------------------------
+# require_light_curve enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestRequireLightCurve:
+    def test_require_lc_raises_when_no_lc_assembled(self) -> None:
+        """require_light_curve=True with no lc_source must raise at assembly time."""
+        catalog = StubCatalogProvider()
+        orch = DataAssemblyOrchestrator(catalog_provider=catalog)
+        target = _make_resolved_target()
+        config = AssemblyConfig(
+            include_light_curve=True,
+            require_light_curve=True,
+        )
+
+        with pytest.raises(AssemblyLightCurveError, match="require_light_curve"):
+            orch.assemble(target, config)
+
+    def test_require_lc_false_allows_none(self) -> None:
+        """require_light_curve=False should not raise when light_curve is None."""
+        catalog = StubCatalogProvider()
+        orch = DataAssemblyOrchestrator(catalog_provider=catalog)
+        target = _make_resolved_target()
+        config = AssemblyConfig(
+            include_light_curve=False,
+            require_light_curve=False,
+        )
 
         result = orch.assemble(target, config)
         assert result.light_curve is None

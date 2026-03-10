@@ -12,6 +12,7 @@ from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import StellarParameters
 from triceratops.scenarios.registry import ScenarioRegistry
+from triceratops.assembly.errors import CatalogAcquisitionError
 from triceratops.validation.workspace import ValidationWorkspace
 
 # ---------------------------------------------------------------------------
@@ -175,6 +176,21 @@ class TestWorkspaceConstruction:
     def test_target_is_first_star(self, workspace: ValidationWorkspace) -> None:
         assert workspace.target is workspace.stars[0]
         assert workspace.target.tic_id == 12345678
+
+    def test_construction_uses_assembly_pipeline(self) -> None:
+        """Workspace construction goes through assemble_stellar_field,
+        which wraps catalog errors in CatalogAcquisitionError."""
+
+        class _BoomCatalog:
+            def query_nearby_stars(self, **kwargs: object) -> object:
+                raise RuntimeError("boom")
+
+        with pytest.raises(CatalogAcquisitionError, match="boom"):
+            ValidationWorkspace(
+                tic_id=12345678,
+                sectors=np.array([1]),
+                catalog_provider=_BoomCatalog(),
+            )
 
 
 # ---------------------------------------------------------------------------

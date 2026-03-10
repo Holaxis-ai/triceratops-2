@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from triceratops.assembly.config import AssemblyConfig
-from triceratops.assembly.errors import AssemblyError, AssemblyLightCurveError
+from triceratops.assembly.errors import AssemblyConfigError, AssemblyError, AssemblyLightCurveError
 from triceratops.assembly.inputs import AssembledInputs, AssemblyMetadata
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
@@ -99,6 +99,15 @@ class DataAssemblyOrchestrator:
         if config is None:
             config = AssemblyConfig()
 
+        # Validate scenario_ids before any I/O
+        if scenario_ids is not None:
+            unknown = [sid for sid in scenario_ids if sid not in self._registry]
+            if unknown:
+                raise AssemblyConfigError(
+                    f"Unknown scenario IDs: {unknown!r}. "
+                    f"Registered: {sorted(self._registry)}"
+                )
+
         all_warnings: list[str] = []
         all_source_labels: list[str] = []
         all_artifact_ids: list[str] = []
@@ -132,6 +141,13 @@ class DataAssemblyOrchestrator:
             all_artifact_ids.extend(lc_artifacts)
             all_source_labels.append(lc_label)
             per_input_source["light_curve"] = lc_label
+
+        # Enforce require_light_curve after Step 2
+        if config.require_light_curve and config.include_light_curve and light_curve is None:
+            raise AssemblyLightCurveError(
+                "config.require_light_curve is True but no light curve was assembled. "
+                "Provide an lc_source or set require_light_curve=False."
+            )
 
         # Step 3: Contrast curve
         contrast_curve: ContrastCurve | None = None
@@ -197,13 +213,11 @@ class DataAssemblyOrchestrator:
     ) -> bool:
         """Check whether any of the requested scenarios need TRILEGAL data."""
         if scenario_ids is not None:
-            eligible = [self._registry.get(sid) for sid in scenario_ids]
+            ids_to_check = [sid for sid in scenario_ids if sid in self._registry]
         else:
-            eligible = self._registry.all_scenarios()
-        return any(
-            s.scenario_id in ScenarioID.trilegal_scenarios()
-            for s in eligible
-        )
+            ids_to_check = [s.scenario_id for s in self._registry.all_scenarios()]
+        trilegal_ids = ScenarioID.trilegal_scenarios()
+        return any(sid in trilegal_ids for sid in ids_to_check)
 
     def _assemble_stellar_field(
         self,
