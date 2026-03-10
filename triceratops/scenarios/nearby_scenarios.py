@@ -514,76 +514,24 @@ class NEBUnknownScenario(BaseScenario):
         config: Config,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Source: marginal_likelihoods.py:4011-4095"""
-        N = config.n_mc_samples
         force_serial = (not config.parallel) and not bool(external_lcs)
-        qs = samples["qs"]
         idxs = samples["idxs"].astype(int)
         loggs = samples["loggs_possible"][idxs]
         teffs = samples["teffs_possible"][idxs]
 
-        R_s_arr = samples["radii_possible"][idxs]
-        u1_arr = samples["u1s_possible"][idxs]
-        u2_arr = samples["u2s_possible"][idxs]
-        companion_fr = np.zeros(N)
-
-        lnL = np.full(N, -np.inf)
-        lnL_twin = np.full(N, -np.inf)
-
         # Extra mask: main-sequence filter
         ms_mask = (loggs >= MAIN_SEQUENCE_LOGG_MIN) & (teffs <= MAIN_SEQUENCE_TEFF_MAX)
 
-        mask, mask_twin = build_eb_branch_masks(
-            qs, samples["incs"],
-            geometry["Ptra"], geometry["coll"],
-            geometry["Ptra_twin"], geometry["coll_twin"],
+        R_s_arr = samples["radii_possible"][idxs]
+        u1_arr = samples["u1s_possible"][idxs]
+        u2_arr = samples["u2s_possible"][idxs]
+
+        return _eval_eb_lnL(
+            light_curve, lnsigma, samples, geometry,
+            rss=R_s_arr, u1s=u1_arr, u2s=u2_arr,
+            force_serial=force_serial,
             extra_mask=ms_mask,
         )
-
-        chi2_half = lnL_eb_p(
-            time=light_curve.time_days,
-            flux=light_curve.flux,
-            sigma=light_curve.sigma,
-            rss=R_s_arr,
-            rcomps=samples["radii"],
-            eb_flux_ratios=samples["fluxratios"],
-            periods=samples["P_orb"],
-            incs=samples["incs"],
-            as_=geometry["a"],
-            u1s=u1_arr,
-            u2s=u2_arr,
-            eccs=samples["eccs"],
-            argps=samples["argps"],
-            companion_flux_ratios=companion_fr,
-            mask=mask,
-            exptime=light_curve.cadence_days,
-            nsamples=light_curve.supersampling_rate,
-            force_serial=force_serial,
-        )
-        lnL = -0.5 * _ln2pi - lnsigma - chi2_half
-
-        chi2_half_twin = lnL_eb_twin_p(
-            time=light_curve.time_days,
-            flux=light_curve.flux,
-            sigma=light_curve.sigma,
-            rss=R_s_arr,
-            rcomps=samples["radii"],
-            eb_flux_ratios=samples["fluxratios"],
-            periods=2 * samples["P_orb"],
-            incs=samples["incs"],
-            as_=geometry["a_twin"],
-            u1s=u1_arr,
-            u2s=u2_arr,
-            eccs=samples["eccs"],
-            argps=samples["argps"],
-            companion_flux_ratios=companion_fr,
-            mask=mask_twin,
-            exptime=light_curve.cadence_days,
-            nsamples=light_curve.supersampling_rate,
-            force_serial=force_serial,
-        )
-        lnL_twin = -0.5 * _ln2pi - lnsigma - chi2_half_twin
-
-        return lnL, lnL_twin
 
     def _pack_result(
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
@@ -900,67 +848,15 @@ class NEBEvolvedScenario(BaseScenario):
         """
         N = config.n_mc_samples
         force_serial = (not config.parallel) and not bool(external_lcs)
-        qs = samples["qs"]
         R_s_arr = samples["R_s"]  # BUG-05 fix: array
         u1_arr = np.full(N, float(ldc.u1))
         u2_arr = np.full(N, float(ldc.u2))
-        companion_fr = np.zeros(N)
 
-        lnL = np.full(N, -np.inf)
-        lnL_twin = np.full(N, -np.inf)
-
-        mask, mask_twin = build_eb_branch_masks(
-            qs, samples["incs"],
-            geometry["Ptra"], geometry["coll"],
-            geometry["Ptra_twin"], geometry["coll_twin"],
-        )
-
-        chi2_half = lnL_eb_p(
-            time=light_curve.time_days,
-            flux=light_curve.flux,
-            sigma=light_curve.sigma,
-            rss=R_s_arr,
-            rcomps=samples["radii"],
-            eb_flux_ratios=samples["fluxratios"],
-            periods=samples["P_orb"],
-            incs=samples["incs"],
-            as_=geometry["a"],
-            u1s=u1_arr,
-            u2s=u2_arr,
-            eccs=samples["eccs"],
-            argps=samples["argps"],
-            companion_flux_ratios=companion_fr,
-            mask=mask,
-            exptime=light_curve.cadence_days,
-            nsamples=light_curve.supersampling_rate,
+        return _eval_eb_lnL(
+            light_curve, lnsigma, samples, geometry,
+            rss=R_s_arr, u1s=u1_arr, u2s=u2_arr,
             force_serial=force_serial,
         )
-        lnL = -0.5 * _ln2pi - lnsigma - chi2_half
-
-        # BUG-05 fix: pass radii (array) not scalar R_s
-        chi2_half_twin = lnL_eb_twin_p(
-            time=light_curve.time_days,
-            flux=light_curve.flux,
-            sigma=light_curve.sigma,
-            rss=R_s_arr,
-            rcomps=samples["radii"],
-            eb_flux_ratios=samples["fluxratios"],
-            periods=2 * samples["P_orb"],
-            incs=samples["incs"],
-            as_=geometry["a_twin"],
-            u1s=u1_arr,
-            u2s=u2_arr,
-            eccs=samples["eccs"],
-            argps=samples["argps"],
-            companion_flux_ratios=companion_fr,
-            mask=mask_twin,
-            exptime=light_curve.cadence_days,
-            nsamples=light_curve.supersampling_rate,
-            force_serial=force_serial,
-        )
-        lnL_twin = -0.5 * _ln2pi - lnsigma - chi2_half_twin
-
-        return lnL, lnL_twin
 
     def _pack_result(
         self, samples: dict[str, np.ndarray], geometry: dict[str, np.ndarray],
