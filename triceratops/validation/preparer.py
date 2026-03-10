@@ -116,7 +116,9 @@ class ValidationPreparer:
             light_curve: Phase-folded, normalised photometric time series.
             config: Runtime configuration.
             period_days: Orbital period in days (scalar or [min, max] range).
-            mission: Survey mission name ("TESS", "Kepler", "K2").
+            mission: Survey mission name.  Only ``"TESS"`` is supported for
+                prepared compute.  Kepler/K2 support is experimental and not
+                yet available for prepared or remote compute jobs.
             search_radius: Search radius in pixels for catalog query.
             transit_depth: Observed transit depth (fractional).  Required if
                 flux ratios should be computed from pixel data.
@@ -144,7 +146,19 @@ class ValidationPreparer:
 
         warnings: list[str] = []
 
-        # ---- 0. Validate scenario_ids against the registry ----
+        # ---- 0. Mission gate ----
+        # Only TESS is fully supported for prepared compute.  Kepler/K2 prep
+        # paths are incomplete (no cutout support, no K2 LDC data) and are not
+        # eligible for prepared or remote compute jobs.
+        if mission != "TESS":
+            from triceratops.validation.errors import UnsupportedComputeModeError
+            raise UnsupportedComputeModeError(
+                f"prepare() only supports mission='TESS'. Got {mission!r}. "
+                "Kepler/K2 support is experimental; pass mission='TESS' or "
+                "construct PreparedValidationInputs directly for non-TESS testing."
+            )
+
+        # ---- 1. Validate scenario_ids against the registry ----
         # Do this before any IO so callers get a clear error for unregistered IDs.
         # Unregistered IDs are silently tolerated by nothing downstream — they would
         # crash with KeyError inside compute().  Fail here instead with the ID named.
@@ -156,7 +170,7 @@ class ValidationPreparer:
                     "Remove them or register the corresponding scenario before calling prepare()."
                 )
 
-        # ---- 1. Catalog query ----
+        # ---- 2. Catalog query ----
         stellar_field: StellarField = self._catalog.query_nearby_stars(
             tic_id=target_id,
             search_radius_px=search_radius,
@@ -166,7 +180,7 @@ class ValidationPreparer:
         # downstream IO (TRILEGAL fetch, file loads).
         stellar_field.validate()
 
-        # ---- 2. Flux ratios and transit depths (if depth data provided) ----
+        # ---- 3. Flux ratios and transit depths (if depth data provided) ----
         if (
             transit_depth is not None
             and pixel_coords_per_sector is not None
@@ -189,7 +203,7 @@ class ValidationPreparer:
                     "aperture_pixels_per_sector missing — flux ratios not computed."
                 )
 
-        # ---- 3. TRILEGAL population fetch (only if needed by active scenarios) ----
+        # ---- 4. TRILEGAL population fetch (only if needed by active scenarios) ----
         trilegal_population: TRILEGALResult | None = None
         trilegal_cache_origin: str | None = None
         if self._population is not None:
@@ -215,7 +229,7 @@ class ValidationPreparer:
                 )
                 trilegal_cache_origin = trilegal_cache_path
 
-        # ---- 4. Contrast curve loading ----
+        # ---- 5. Contrast curve loading ----
         contrast_curve: ContrastCurve | None = None
         if contrast_curve_file is not None:
             from triceratops.io.contrast_curves import load_contrast_curve
@@ -223,7 +237,7 @@ class ValidationPreparer:
                 Path(contrast_curve_file), band=contrast_curve_band,
             )
 
-        # ---- 5. External light curves loading ----
+        # ---- 6. External light curves loading ----
         external_lcs: list[ExternalLightCurve] | None = None
         _have_files = bool(external_lc_files)
         _have_filts = bool(filt_lcs)

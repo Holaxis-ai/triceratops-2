@@ -28,7 +28,8 @@ class StarCatalogProvider(Protocol):
         Args:
             tic_id: TIC ID (or KIC/EPIC ID for Kepler/K2).
             search_radius_px: Search radius in pixels.
-            mission: "TESS", "Kepler", or "K2".
+            mission: Survey mission name.  Only ``"TESS"`` is supported for
+                prepared compute.  Kepler/K2 support is experimental.
 
         Returns:
             StellarField with target at index 0.
@@ -54,7 +55,9 @@ class ApertureProvider(Protocol):
             ra_deg, dec_deg: Coordinates of the target.
             size_px: Size of the cutout in pixels (square).
             sectors: Array of sector/quarter/campaign numbers.
-            mission: "TESS", "Kepler", or "K2".
+            mission: Survey mission name.  Only ``"TESS"`` is fully supported;
+                non-TESS missions raise ``NotImplementedError`` in the default
+                provider.
 
         Returns:
             List of 2D arrays of shape (size_px, size_px). One per sector.

@@ -27,6 +27,10 @@ class ValidationWorkspace:
 
     Constructor fires catalog queries (via injected providers) to assemble
     the stellar field. Use stub providers in tests to avoid network calls.
+
+    Only ``mission="TESS"`` is supported for prepared compute.  Kepler/K2
+    support is experimental; passing a non-TESS mission will raise
+    ``UnsupportedComputeModeError`` when ``compute_probs()`` is called.
     """
 
     def __init__(

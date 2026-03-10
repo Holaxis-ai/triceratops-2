@@ -103,6 +103,8 @@ class PreparedValidationInputs:
         Raises:
             ValueError: If structural field invariants are broken
                 (delegated to ``StellarField.validate()``).
+            UnsupportedComputeModeError: If the mission is not "TESS".
+                Kepler/K2 prepared compute is not yet supported.
             PreparedInputIncompleteError: If a required field is missing
                 (no stellar_params, missing TRILEGAL population).
             ValidationInputError: If a scientific input value is invalid
@@ -112,11 +114,24 @@ class PreparedValidationInputs:
 
         from triceratops.validation.errors import (
             PreparedInputIncompleteError,
+            UnsupportedComputeModeError,
             ValidationInputError,
         )
 
         # 1. Field structure (target at index 0, no duplicates, etc.)
         self.stellar_field.validate()
+
+        # 1.5. Mission gate — only TESS prepared compute is supported.
+        # Kepler/K2 prep paths are incomplete (no cutout support, no K2 LDC
+        # data) and are not eligible for remote compute jobs.  Checked after
+        # structural validation so the field invariants fire first.
+        if self.stellar_field.mission != "TESS":
+            raise UnsupportedComputeModeError(
+                f"Prepared compute only supports mission='TESS'. "
+                f"Got mission={self.stellar_field.mission!r}. "
+                "Kepler/K2 support is experimental and not available for "
+                "prepared compute jobs."
+            )
 
         # 2. Target must have stellar parameters
         if self.stellar_field.target.stellar_params is None:
