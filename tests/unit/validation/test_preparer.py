@@ -2,22 +2,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
+from triceratops.assembly.inputs import AssembledInputs
 from triceratops.config.config import Config
 from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import ContrastCurve, StellarParameters
-from triceratops.population.protocols import PopulationSynthesisProvider, TRILEGALResult
+from triceratops.domain.value_objects import StellarParameters
+from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.registry import ScenarioRegistry
 from triceratops.validation.engine import ValidationEngine
 from triceratops.validation.job import PreparedValidationInputs
 from triceratops.validation.preparer import ValidationPreparer
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -97,7 +96,9 @@ class _StubPopulationProvider:
         self._result = result
         self.call_count = 0
 
-    def query(self, ra_deg: float, dec_deg: float, target_tmag: float, cache_path=None) -> TRILEGALResult:
+    def query(
+        self, ra_deg: float, dec_deg: float, target_tmag: float, cache_path=None,
+    ) -> TRILEGALResult:
         self.call_count += 1
         return self._result
 
@@ -130,7 +131,15 @@ class _FakeScenario:
     def returns_twin(self) -> bool:
         return False
 
-    def compute(self, **kwargs: object) -> ScenarioResult:
+    def compute(
+        self,
+        light_curve: LightCurve,
+        stellar_params: StellarParameters,
+        period_days: float | list[float] | tuple[float, float],
+        config: Config,
+        external_lcs: list | None = None,
+        **kwargs: object,
+    ) -> ScenarioResult:
         return self._result
 
 
@@ -164,7 +173,7 @@ def _make_assembled_inputs(
     with_lc: bool = True,
     with_trilegal: bool = False,
     stellar_params: StellarParameters | None = None,
-) -> "AssembledInputs":
+) -> AssembledInputs:
     """Build a minimal AssembledInputs for testing prepare()."""
     from triceratops.assembly.inputs import AssembledInputs
     from triceratops.lightcurve.ephemeris import ResolvedTarget
@@ -278,9 +287,9 @@ class TestPrepare:
             preparer.prepare(assembled, cfg, period_days=5.0)
 
     def test_rejects_empty_light_curve(self) -> None:
-        from triceratops.validation.errors import ValidationInputError
         from triceratops.assembly.inputs import AssembledInputs
         from triceratops.lightcurve.ephemeris import ResolvedTarget
+        from triceratops.validation.errors import ValidationInputError
 
         preparer = ValidationPreparer()
         empty_lc = LightCurve(
@@ -299,9 +308,9 @@ class TestPrepare:
             preparer.prepare(assembled, cfg, period_days=5.0)
 
     def test_rejects_none_light_curve(self) -> None:
-        from triceratops.validation.errors import ValidationInputError
         from triceratops.assembly.inputs import AssembledInputs
         from triceratops.lightcurve.ephemeris import ResolvedTarget
+        from triceratops.validation.errors import ValidationInputError
 
         preparer = ValidationPreparer()
         assembled = AssembledInputs(
@@ -348,8 +357,8 @@ class TestPrepare:
 
     def test_end_to_end_orchestrator_to_engine(self) -> None:
         """assemble() -> prepare() -> compute_prepared() chain."""
-        from triceratops.assembly.orchestrator import DataAssemblyOrchestrator
         from triceratops.assembly.config import AssemblyConfig
+        from triceratops.assembly.orchestrator import DataAssemblyOrchestrator
         from triceratops.lightcurve.ephemeris import ResolvedTarget
 
         sf = _make_stellar_field(77777)
@@ -398,129 +407,6 @@ class TestPrepare:
 
 
 # ---------------------------------------------------------------------------
-# LegacyPreparerAdapter tests
-# ---------------------------------------------------------------------------
-
-
-class TestLegacyPreparerAdapter:
-    """Tests that the legacy 18-arg prepare() still works via the adapter."""
-
-    def test_constructs_with_catalog_provider_only(self) -> None:
-        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
-
-        sf = _make_stellar_field()
-        adapter = LegacyPreparerAdapter(catalog_provider=_StubCatalogProvider(sf))
-        assert adapter is not None
-
-    def test_prepare_returns_prepared_validation_inputs(self) -> None:
-        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
-
-        sf = _make_stellar_field()
-        catalog = _StubCatalogProvider(sf)
-        adapter = LegacyPreparerAdapter(catalog_provider=catalog)
-
-        result = adapter.prepare(
-            target_id=11111,
-            sectors=np.array([1, 2]),
-            light_curve=_make_lc(),
-            config=_make_cfg(),
-            period_days=5.0,
-        )
-        assert isinstance(result, PreparedValidationInputs)
-
-    def test_prepare_populates_all_required_fields(self) -> None:
-        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
-
-        sf = _make_stellar_field(99999)
-        catalog = _StubCatalogProvider(sf)
-        lc = _make_lc()
-        cfg = _make_cfg()
-
-        adapter = LegacyPreparerAdapter(catalog_provider=catalog)
-        pvi = adapter.prepare(
-            target_id=99999,
-            sectors=np.array([5]),
-            light_curve=lc,
-            config=cfg,
-            period_days=14.2,
-        )
-        assert pvi.target_id == 99999
-        assert pvi.stellar_field is sf
-        assert pvi.light_curve is lc
-        assert pvi.config is cfg
-        assert pvi.period_days == pytest.approx(14.2)
-
-    def test_prepare_calls_catalog_provider(self) -> None:
-        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
-
-        sf = _make_stellar_field()
-        catalog = _StubCatalogProvider(sf)
-        adapter = LegacyPreparerAdapter(catalog_provider=catalog)
-
-        adapter.prepare(
-            target_id=11111,
-            sectors=np.array([1]),
-            light_curve=_make_lc(),
-            config=_make_cfg(),
-            period_days=5.0,
-        )
-        assert catalog.call_count == 1
-
-    def test_prepare_fetches_trilegal_when_provider_given(self) -> None:
-        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
-
-        sf = _make_stellar_field()
-        catalog = _StubCatalogProvider(sf)
-        pop = _StubPopulationProvider(_make_trilegal())
-        adapter = LegacyPreparerAdapter(catalog_provider=catalog, population_provider=pop)
-
-        pvi = adapter.prepare(
-            target_id=11111,
-            sectors=np.array([1]),
-            light_curve=_make_lc(),
-            config=_make_cfg(),
-            period_days=5.0,
-        )
-        assert pop.call_count == 1
-        assert pvi.trilegal_population is not None
-        assert isinstance(pvi.trilegal_population, TRILEGALResult)
-
-    def test_prepare_trilegal_none_when_no_provider(self) -> None:
-        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
-
-        sf = _make_stellar_field()
-        catalog = _StubCatalogProvider(sf)
-        adapter = LegacyPreparerAdapter(catalog_provider=catalog, population_provider=None)
-
-        pvi = adapter.prepare(
-            target_id=11111,
-            sectors=np.array([1]),
-            light_curve=_make_lc(),
-            config=_make_cfg(),
-            period_days=5.0,
-        )
-        assert pvi.trilegal_population is None
-
-    def test_prepare_optional_fields_default_to_none(self) -> None:
-        from triceratops.validation.legacy_adapter import LegacyPreparerAdapter
-
-        sf = _make_stellar_field()
-        catalog = _StubCatalogProvider(sf)
-        adapter = LegacyPreparerAdapter(catalog_provider=catalog)
-
-        pvi = adapter.prepare(
-            target_id=11111,
-            sectors=np.array([1]),
-            light_curve=_make_lc(),
-            config=_make_cfg(),
-            period_days=5.0,
-        )
-        assert pvi.external_lcs is None
-        assert pvi.contrast_curve is None
-        assert pvi.molusc_data is None
-
-
-# ---------------------------------------------------------------------------
 # ValidationWorkspace constructor IO test
 # ---------------------------------------------------------------------------
 
@@ -532,7 +418,7 @@ class TestWorkspaceConstructorIO:
         catalog = _StubCatalogProvider(sf)
 
         from triceratops.validation.workspace import ValidationWorkspace
-        ws = ValidationWorkspace(
+        ValidationWorkspace(
             tic_id=12345,
             sectors=np.array([1]),
             catalog_provider=catalog,

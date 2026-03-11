@@ -9,7 +9,7 @@ Replaces the stateful aspects of the original ``target`` class:
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -25,6 +25,8 @@ from triceratops.validation.engine import ValidationEngine
 from triceratops.validation.job import PreparedValidationInputs
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from triceratops.domain.molusc import MoluscData
     from triceratops.lightcurve.ephemeris import ResolvedTarget
 
@@ -158,6 +160,43 @@ class ValidationWorkspace:
     def target(self) -> Star:
         """The target star."""
         return self._ensure_stellar_field().target
+
+    @property
+    def stars_df(self) -> pd.DataFrame:
+        """All stars in the stellar field as a pandas DataFrame."""
+        import pandas as pd
+
+        rows = []
+        for s in self._ensure_stellar_field().stars:
+            row: dict = {
+                "tic_id": s.tic_id,
+                "ra_deg": s.ra_deg,
+                "dec_deg": s.dec_deg,
+                "tmag": s.tmag,
+                "jmag": s.jmag,
+                "hmag": s.hmag,
+                "kmag": s.kmag,
+                "bmag": s.bmag,
+                "vmag": s.vmag,
+                "gmag": s.gmag,
+                "rmag": s.rmag,
+                "imag": s.imag,
+                "zmag": s.zmag,
+                "separation_arcsec": s.separation_arcsec,
+                "position_angle_deg": s.position_angle_deg,
+                "flux_ratio": s.flux_ratio,
+                "transit_depth_required": s.transit_depth_required,
+            }
+            if s.stellar_params is not None:
+                sp = s.stellar_params
+                row["mass_msun"] = sp.mass_msun
+                row["radius_rsun"] = sp.radius_rsun
+                row["teff_k"] = sp.teff_k
+                row["logg"] = sp.logg
+                row["metallicity_dex"] = sp.metallicity_dex
+                row["parallax_mas"] = sp.parallax_mas
+            rows.append(row)
+        return pd.DataFrame(rows)
 
     def add_star(self, star: Star) -> None:
         """Add a neighbor star to the stellar field. Invalidates cached results.
@@ -388,7 +427,7 @@ class ValidationWorkspace:
 
     # -- Plotting --
 
-    def plot_field(self, **kwargs: object) -> None:
+    def plot_field(self, **kwargs: Any) -> None:
         """Plot the stellar field around the target.
 
         Delegates to :func:`triceratops.plotting.plot_field`.
@@ -400,7 +439,7 @@ class ValidationWorkspace:
 
         plot_field(self._ensure_stellar_field(), self.search_radius, **kwargs)
 
-    def plot_fits(self, **kwargs: object) -> None:
+    def plot_fits(self, **kwargs: Any) -> None:
         """Plot best-fit model light curves for each non-negligible scenario.
 
         Delegates to :func:`triceratops.plotting.plot_fits`.
