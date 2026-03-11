@@ -172,11 +172,39 @@ class AutoFppComputeConfig:
 
 
 @dataclass(frozen=True)
-class _PreparedApertureLightCurve:
+class AutoFppResolvedTarget:
+    """Resolved target identity plus the transit depth used for prep."""
+
+    resolved_target: ResolvedTarget
+    transit_depth: float
+
+
+@dataclass(frozen=True)
+class AutoFppPreparedLightCurve:
+    """Prepared folded light curve plus aperture geometry required for field assembly."""
+
     light_curve_result: LightCurvePreparationResult
     unbinned_light_curve: LightCurvePreparationResult | None = None
     aperture_masks: tuple[np.ndarray, ...] = ()
     tpfs: tuple[object, ...] = ()
+
+
+@dataclass(frozen=True)
+class AutoFppPreparedField:
+    """Prepared stellar field plus optional aperture provenance."""
+
+    stellar_field: StellarField
+    aperture_provenance: ApertureProvenance | None = None
+
+
+@dataclass(frozen=True)
+class AutoFppPreparedTrilegal:
+    """Materialized TRILEGAL payload for a compute-ready auto-FPP artifact."""
+
+    trilegal_population: object
+
+
+_PreparedApertureLightCurve = AutoFppPreparedLightCurve
 
 
 def prepare_auto_fpp(
@@ -187,38 +215,85 @@ def prepare_auto_fpp(
 ) -> PreparedAutoFppArtifact:
     """Prepare a durable auto-FPP artifact for later compute."""
     cfg = config or AutoFppPrepareConfig()
+    resolved = resolve_auto_fpp_target(
+        target,
+        config=cfg,
+        ephemeris=ephemeris,
+    )
+    prepared_lc = prepare_auto_fpp_lightcurve(
+        resolved,
+        config=cfg,
+    )
+    prepared_field = assemble_auto_fpp_stellar_field(
+        resolved,
+        prepared_lc,
+        config=cfg,
+    )
+    prepared_trilegal = materialize_auto_fpp_trilegal(
+        resolved,
+        prepared_lc,
+        prepared_field,
+        config=cfg,
+    )
+    return build_auto_fpp_artifact(
+        resolved,
+        prepared_lc,
+        prepared_field,
+        config=cfg,
+        prepared_trilegal=prepared_trilegal,
+    )
+
+
+def resolve_auto_fpp_target(
+    target: str | int,
+    *,
+    config: AutoFppPrepareConfig | None = None,
+    ephemeris: Ephemeris | None = None,
+) -> AutoFppResolvedTarget:
+    """Resolve target identity and transit depth for auto-FPP preparation."""
+    cfg = config or AutoFppPrepareConfig()
     resolved_target, transit_depth = _resolve_target_and_depth(
         target,
         _prepare_config_to_resolution_view(cfg),
         ephemeris,
     )
+    return AutoFppResolvedTarget(
+        resolved_target=resolved_target,
+        transit_depth=transit_depth,
+    )
+
+
+def prepare_auto_fpp_lightcurve(
+    resolved: AutoFppResolvedTarget,
+    *,
+    config: AutoFppPrepareConfig | None = None,
+) -> AutoFppPreparedLightCurve:
+    """Prepare the folded light curve and aperture masks for auto-FPP."""
+    cfg = config or AutoFppPrepareConfig()
     prepare_kwargs: dict[str, object] = {}
     if cfg.include_unbinned_folded_lightcurve:
         prepare_kwargs["include_unbinned_folded"] = True
-    prepared_lc = _prepare_tpf_lightcurve(
-        resolved_target,
+    return _prepare_tpf_lightcurve(
+        resolved.resolved_target,
         _prepare_config_to_resolution_view(cfg),
         **prepare_kwargs,
     )
 
-    workspace_kwargs = {
-        "tic_id": resolved_target.tic_id,
-        "sectors": np.asarray(prepared_lc.light_curve_result.sectors_used, dtype=int),
-        "mission": "TESS",
-        "search_radius": cfg.search_radius_px,
-    }
-    if cfg.materialize_trilegal:
-        from triceratops.population.trilegal_provider import TRILEGALProvider
 
-        workspace_kwargs["population_provider"] = TRILEGALProvider()
-    try:
-        workspace = ValidationWorkspace(**workspace_kwargs)
-    except TypeError as exc:
-        if "population_provider" not in str(exc):
-            raise
-        workspace_kwargs.pop("population_provider", None)
-        workspace = ValidationWorkspace(**workspace_kwargs)
-    workspace.set_resolved_target(resolved_target)
+def assemble_auto_fpp_stellar_field(
+    resolved: AutoFppResolvedTarget,
+    prepared_lc: AutoFppPreparedLightCurve,
+    *,
+    config: AutoFppPrepareConfig | None = None,
+) -> AutoFppPreparedField:
+    """Fetch the stellar field and compute contamination/depth information."""
+    cfg = config or AutoFppPrepareConfig()
+    workspace = _build_prepare_workspace(
+        resolved.resolved_target,
+        prepared_lc,
+        cfg,
+        include_population_provider=False,
+    )
     field = workspace.fetch_catalog()
     pixel_coords_per_sector, aperture_pixels_per_sector = _derive_sector_geometry(
         prepared_lc.tpfs,
@@ -227,25 +302,11 @@ def prepare_auto_fpp(
         cfg.search_radius_px,
     )
     workspace.calc_depths(
-        transit_depth,
+        resolved.transit_depth,
         pixel_coords_per_sector=pixel_coords_per_sector,
         aperture_pixels_per_sector=aperture_pixels_per_sector,
         sigma_psf_px=cfg.sigma_psf_px,
     )
-
-    trilegal_population = None
-    if cfg.materialize_trilegal:
-        prepared_inputs = workspace.prepare(
-            light_curve=prepared_lc.light_curve_result.light_curve,
-            period_days=resolved_target.ephemeris.period_days,
-        )
-        trilegal_population = prepared_inputs.trilegal_population
-        if trilegal_population is None:
-            raise PreparedInputIncompleteError(
-                "auto-FPP preparation requires TRILEGAL, but no trilegal_population "
-                "was materialized. Ensure a population provider is configured and "
-                "the TRILEGAL query succeeds."
-            )
 
     aperture_provenance = None
     if cfg.include_aperture_provenance:
@@ -254,12 +315,59 @@ def prepare_auto_fpp(
             aperture_pixels_per_sector=tuple(aperture_pixels_per_sector),
             pixel_coords_per_sector=tuple(pixel_coords_per_sector),
         )
-
-    return make_prepared_artifact(
-        resolved_target=resolved_target,
-        light_curve_result=prepared_lc.light_curve_result,
+    return AutoFppPreparedField(
         stellar_field=field,
-        transit_depth=transit_depth,
+        aperture_provenance=aperture_provenance,
+    )
+
+
+def materialize_auto_fpp_trilegal(
+    resolved: AutoFppResolvedTarget,
+    prepared_lc: AutoFppPreparedLightCurve,
+    prepared_field: AutoFppPreparedField,
+    *,
+    config: AutoFppPrepareConfig | None = None,
+) -> AutoFppPreparedTrilegal | None:
+    """Materialize TRILEGAL data required for compute-ready auto-FPP artifacts."""
+    cfg = config or AutoFppPrepareConfig()
+    if not cfg.materialize_trilegal:
+        return None
+    workspace = _build_prepare_workspace(
+        resolved.resolved_target,
+        prepared_lc,
+        cfg,
+        include_population_provider=True,
+        stellar_field=deepcopy(prepared_field.stellar_field),
+    )
+    prepared_inputs = workspace.prepare(
+        light_curve=prepared_lc.light_curve_result.light_curve,
+        period_days=resolved.resolved_target.ephemeris.period_days,
+    )
+    trilegal_population = prepared_inputs.trilegal_population
+    if trilegal_population is None:
+        raise PreparedInputIncompleteError(
+            "auto-FPP preparation requires TRILEGAL, but no trilegal_population "
+            "was materialized. Ensure a population provider is configured and "
+            "the TRILEGAL query succeeds."
+        )
+    return AutoFppPreparedTrilegal(trilegal_population=trilegal_population)
+
+
+def build_auto_fpp_artifact(
+    resolved: AutoFppResolvedTarget,
+    prepared_lc: AutoFppPreparedLightCurve,
+    prepared_field: AutoFppPreparedField,
+    *,
+    config: AutoFppPrepareConfig | None = None,
+    prepared_trilegal: AutoFppPreparedTrilegal | None = None,
+) -> PreparedAutoFppArtifact:
+    """Build a durable auto-FPP artifact from explicit preparation stages."""
+    cfg = config or AutoFppPrepareConfig()
+    return make_prepared_artifact(
+        resolved_target=resolved.resolved_target,
+        light_curve_result=prepared_lc.light_curve_result,
+        stellar_field=prepared_field.stellar_field,
+        transit_depth=resolved.transit_depth,
         aperture_mode=cfg.aperture.mode,
         aperture_threshold_sigma=cfg.aperture.threshold_sigma,
         custom_aperture_pixels=cfg.aperture.custom_pixels,
@@ -269,8 +377,12 @@ def prepare_auto_fpp(
         lightcurve_config=cfg.lightcurve,
         warnings=tuple(prepared_lc.light_curve_result.warnings),
         source_labels=("lightkurve",),
-        aperture_provenance=aperture_provenance,
-        trilegal_population=trilegal_population,
+        aperture_provenance=prepared_field.aperture_provenance,
+        trilegal_population=(
+            None
+            if prepared_trilegal is None
+            else prepared_trilegal.trilegal_population
+        ),
         unbinned_light_curve=(
             None
             if prepared_lc.unbinned_light_curve is None
@@ -406,7 +518,7 @@ def _prepare_tpf_lightcurve(
     config: FppRunConfig,
     *,
     include_unbinned_folded: bool = False,
-) -> _PreparedApertureLightCurve:
+) -> AutoFppPreparedLightCurve:
     import lightkurve as lk
 
     if target.ephemeris is None:
@@ -462,7 +574,7 @@ def _prepare_tpf_lightcurve(
             warnings=[],
         )
     sectors_used = _extract_tpf_sectors(tpfs)
-    return _PreparedApertureLightCurve(
+    return AutoFppPreparedLightCurve(
         light_curve_result=LightCurvePreparationResult(
             light_curve=lc_domain,
             ephemeris=target.ephemeris,
@@ -700,13 +812,62 @@ def _compute_prepared_artifact(
     return workspace.compute_prepared(prepared_inputs), workspace
 
 
+def _build_prepare_workspace(
+    resolved_target: ResolvedTarget,
+    prepared_lc: AutoFppPreparedLightCurve,
+    config: AutoFppPrepareConfig,
+    *,
+    include_population_provider: bool,
+    stellar_field: StellarField | None = None,
+) -> ValidationWorkspace:
+    workspace_kwargs: dict[str, object] = {
+        "tic_id": resolved_target.tic_id,
+        "sectors": np.asarray(prepared_lc.light_curve_result.sectors_used, dtype=int),
+        "mission": "TESS",
+        "search_radius": config.search_radius_px,
+    }
+    if stellar_field is not None:
+        workspace_kwargs["stellar_field"] = stellar_field
+    if include_population_provider:
+        from triceratops.population.trilegal_provider import TRILEGALProvider
+
+        workspace_kwargs["population_provider"] = TRILEGALProvider()
+    try:
+        workspace = ValidationWorkspace(**workspace_kwargs)
+    except TypeError as exc:
+        if (
+            "population_provider" not in str(exc)
+            and "stellar_field" not in str(exc)
+        ):
+            raise
+        workspace_kwargs.pop("population_provider", None)
+        workspace_kwargs.pop("stellar_field", None)
+        workspace = ValidationWorkspace(**workspace_kwargs)
+        if stellar_field is not None:
+            if hasattr(workspace, "_stellar_field"):
+                workspace._stellar_field = stellar_field  # type: ignore[attr-defined]
+            if hasattr(workspace, "field"):
+                workspace.field = stellar_field  # type: ignore[attr-defined]
+    workspace.set_resolved_target(resolved_target)
+    return workspace
+
+
 __all__ = [
     "ApertureConfig",
     "AutoFppComputeConfig",
     "AutoFppPrepareConfig",
+    "AutoFppPreparedField",
+    "AutoFppPreparedLightCurve",
+    "AutoFppPreparedTrilegal",
+    "AutoFppResolvedTarget",
     "FppRunConfig",
     "FppRunResult",
+    "assemble_auto_fpp_stellar_field",
+    "build_auto_fpp_artifact",
     "compute_auto_fpp",
+    "materialize_auto_fpp_trilegal",
     "prepare_auto_fpp",
+    "prepare_auto_fpp_lightcurve",
+    "resolve_auto_fpp_target",
     "run_tess_fpp",
 ]

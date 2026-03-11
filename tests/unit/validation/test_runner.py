@@ -21,9 +21,14 @@ from triceratops.validation.runner import (
     ApertureConfig,
     AutoFppComputeConfig,
     AutoFppPrepareConfig,
+    assemble_auto_fpp_stellar_field,
+    build_auto_fpp_artifact,
     FppRunConfig,
     compute_auto_fpp,
+    materialize_auto_fpp_trilegal,
     prepare_auto_fpp,
+    prepare_auto_fpp_lightcurve,
+    resolve_auto_fpp_target,
     run_tess_fpp,
 )
 
@@ -206,18 +211,22 @@ def test_run_tess_fpp_orchestrates_end_to_end(monkeypatch) -> None:
     )
     result = run_tess_fpp("TOI-123.01", config=cfg)
 
-    assert len(StubWorkspace.instances) == 2
-    prep_workspace, compute_workspace = StubWorkspace.instances
+    assert len(StubWorkspace.instances) == 3
+    field_workspace, trilegal_workspace, compute_workspace = StubWorkspace.instances
 
-    assert prep_workspace.tic_id == 12345
-    assert prep_workspace.sectors.tolist() == [14, 15]
-    assert prep_workspace.search_radius == 12
-    assert prep_workspace._resolved_target == result.resolved_target
-    assert prep_workspace.calc_depths_args is not None
-    assert prep_workspace.calc_depths_args[0] == pytest.approx(0.0025)
-    assert prep_workspace.calc_depths_args[1] == pixel_coords
-    assert prep_workspace.calc_depths_args[2] == aperture_pixels
-    assert prep_workspace.calc_depths_args[3] == pytest.approx(0.5)
+    assert field_workspace.tic_id == 12345
+    assert field_workspace.sectors.tolist() == [14, 15]
+    assert field_workspace.search_radius == 12
+    assert field_workspace._resolved_target == result.resolved_target
+    assert field_workspace.calc_depths_args is not None
+    assert field_workspace.calc_depths_args[0] == pytest.approx(0.0025)
+    assert field_workspace.calc_depths_args[1] == pixel_coords
+    assert field_workspace.calc_depths_args[2] == aperture_pixels
+    assert field_workspace.calc_depths_args[3] == pytest.approx(0.5)
+
+    assert trilegal_workspace.tic_id == 12345
+    assert trilegal_workspace._resolved_target == result.resolved_target
+    assert trilegal_workspace.prepare_args is not None
 
     assert compute_workspace.tic_id == 12345
     assert compute_workspace._resolved_target == result.resolved_target
@@ -284,7 +293,73 @@ def test_prepare_auto_fpp_materializes_trilegal_when_requested(monkeypatch) -> N
     )
 
     assert artifact.resolved_target.tic_id == 12345
-    assert StubWorkspace.instances[0].prepare_args is not None
+    assert any(instance.prepare_args is not None for instance in StubWorkspace.instances)
+
+
+def test_prepare_stages_compose_into_artifact(monkeypatch) -> None:
+    StubWorkspace.instances.clear()
+    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+    monkeypatch.setattr(
+        runner,
+        "resolve_toi_to_tic_ephemeris_depth",
+        lambda target, cache_ttl_seconds, disk_cache_dir: ToiResolutionResult(
+            status=LookupStatus.OK,
+            toi_query=str(target),
+            tic_id=12345,
+            matched_toi="123.01",
+            period_days=5.0,
+            t0_btjd=1000.0,
+            duration_hours=2.0,
+            depth_ppm=2500.0,
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_prepare_tpf_lightcurve",
+        lambda target, config: runner.AutoFppPreparedLightCurve(
+            light_curve_result=_lc_result(),
+            aperture_masks=(np.array([[True, False], [False, True]]),),
+            tpfs=("fake",),
+        ),
+    )
+    pixel_coords = [np.array([[0.0, 0.0]])]
+    aperture_pixels = [np.array([[0.0, 0.0], [1.0, 1.0]])]
+    monkeypatch.setattr(
+        runner,
+        "_derive_sector_geometry",
+        lambda tpfs, masks, field, search_radius_px: (pixel_coords, aperture_pixels),
+    )
+
+    cfg = AutoFppPrepareConfig(include_aperture_provenance=True)
+    resolved = resolve_auto_fpp_target("TOI-123.01", config=cfg)
+    prepared_lc = prepare_auto_fpp_lightcurve(resolved, config=cfg)
+    prepared_field = assemble_auto_fpp_stellar_field(
+        resolved,
+        prepared_lc,
+        config=cfg,
+    )
+    prepared_trilegal = materialize_auto_fpp_trilegal(
+        resolved,
+        prepared_lc,
+        prepared_field,
+        config=cfg,
+    )
+    artifact = build_auto_fpp_artifact(
+        resolved,
+        prepared_lc,
+        prepared_field,
+        config=cfg,
+        prepared_trilegal=prepared_trilegal,
+    )
+
+    assert resolved.resolved_target.tic_id == 12345
+    assert prepared_lc.light_curve_result.cadence_used == "2min"
+    assert prepared_field.aperture_provenance is not None
+    assert prepared_field.aperture_provenance.pixel_coords_per_sector == tuple(pixel_coords)
+    assert prepared_trilegal is not None
+    assert artifact.resolved_target.tic_id == 12345
+    assert artifact.trilegal_population is not None
+    assert artifact.aperture_provenance is not None
 
 
 def test_prepare_auto_fpp_fails_if_trilegal_is_not_materialized(monkeypatch) -> None:
