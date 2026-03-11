@@ -14,6 +14,9 @@ from auto_fpp.artifacts import (
     ArtifactStageState,
     AutoFppLightCurveCheckpoint,
     AutoFppPrepareCheckpoint,
+    LightCurveReplayProvenance,
+    LightCurveVariant,
+    LightkurveSelectedProduct,
     PreparedAutoFppArtifact,
     PreparedSectorGeometry,
     SectorApertureManifest,
@@ -203,6 +206,49 @@ def test_prepared_artifact_round_trips_to_bundle() -> None:
         lightcurve_config=LightCurveConfig(),
         warnings=("warning",),
         source_labels=("lightkurve",),
+        lightcurve_provenance=LightCurveReplayProvenance(
+            search_target="TIC 12345",
+            mission="TESS",
+            quality_mask="default",
+            cutout_size=(21, 21),
+            selected_products=(
+                LightkurveSelectedProduct(
+                    sector=14,
+                    author="SPOC",
+                    exptime_seconds=120.0,
+                    row_identity={
+                        "obsid": 1001,
+                        "sequence_number": 14,
+                        "author": "SPOC",
+                        "productFilename": "sector14.fits",
+                    },
+                ),
+                LightkurveSelectedProduct(
+                    sector=15,
+                    author="SPOC",
+                    exptime_seconds=120.0,
+                    row_identity={
+                        "obsid": 1002,
+                        "sequence_number": 15,
+                        "author": "SPOC",
+                        "productFilename": "sector15.fits",
+                    },
+                ),
+            ),
+        ),
+        lightcurve_variants=(
+            LightCurveVariant(
+                bin_count=500,
+                light_curve=LightCurve(
+                    time_days=np.linspace(-0.1, 0.1, 5),
+                    flux=np.linspace(0.9995, 1.0005, 5),
+                    flux_err=0.0015,
+                    cadence_days=0.01,
+                    supersampling_rate=5,
+                ),
+                created_at_utc="2026-03-11T12:34:56Z",
+            ),
+        ),
         aperture_provenance=ApertureProvenance(
             aperture_masks=(np.array([[True, False], [False, True]]),),
             aperture_pixels_per_sector=(np.array([[0.0, 0.0], [1.0, 1.0]]),),
@@ -235,6 +281,15 @@ def test_prepared_artifact_round_trips_to_bundle() -> None:
     np.testing.assert_array_equal(
         loaded.aperture_provenance.aperture_masks[0],
         np.array([[True, False], [False, True]]),
+    )
+    assert loaded.lightcurve_provenance is not None
+    assert loaded.lightcurve_provenance.search_target == "TIC 12345"
+    assert loaded.lightcurve_provenance.selected_products[0].row_identity["obsid"] == 1001
+    assert len(loaded.lightcurve_variants) == 1
+    assert loaded.lightcurve_variants[0].bin_count == 500
+    np.testing.assert_allclose(
+        loaded.lightcurve_variants[0].light_curve.time_days,
+        np.linspace(-0.1, 0.1, 5),
     )
     assert loaded.unbinned_light_curve is not None
     np.testing.assert_allclose(loaded.unbinned_light_curve.time_days, unbinned.time_days)
