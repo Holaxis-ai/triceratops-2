@@ -5,6 +5,7 @@ __version__ = "0.2.0.dev0"
 
 from triceratops.config.config import Config, MissionConfig
 from triceratops.domain.scenario_id import ScenarioID
+from triceratops.plotting import plot_field, plot_fits
 from triceratops.validation import (
     PreparedValidationInputs,
     PreparedValidationMetadata,
@@ -23,4 +24,6 @@ __all__ = [
     "Config",
     "MissionConfig",
     "ScenarioID",
+    "plot_field",
+    "plot_fits",
 ]

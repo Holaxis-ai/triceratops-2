@@ -3,13 +3,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from triceratops.domain.entities import LightCurve, Star, StellarField
-from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import StellarParameters
-from triceratops.lightcurve.config import LightCurveConfig
-from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
-from triceratops.lightcurve.result import LightCurvePreparationResult
-from triceratops.population.protocols import TRILEGALResult
 from auto_fpp.artifacts import (
     ARTIFACT_KIND_COMPUTE_READY,
     ARTIFACT_KIND_PREPARED,
@@ -19,6 +12,15 @@ from auto_fpp.artifacts import (
     default_artifact_capabilities,
     make_prepared_artifact,
 )
+from auto_fpp.outputs import with_compute_outputs, with_preparation_outputs
+from triceratops.domain.entities import LightCurve, Star, StellarField
+from triceratops.domain.result import ValidationResult
+from triceratops.domain.scenario_id import ScenarioID
+from triceratops.domain.value_objects import StellarParameters
+from triceratops.lightcurve.config import LightCurveConfig
+from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
+from triceratops.lightcurve.result import LightCurvePreparationResult
+from triceratops.population.protocols import TRILEGALResult
 
 
 def _stellar_field() -> StellarField:
@@ -227,3 +229,73 @@ def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:
 
     assert artifact.artifact_kind == ARTIFACT_KIND_PREPARED
     assert artifact.artifact_capabilities.contains_trilegal_population is False
+
+
+def test_preparation_outputs_are_added_and_round_trip() -> None:
+    artifact = with_preparation_outputs(
+        make_prepared_artifact(
+            resolved_target=ResolvedTarget(
+                target_ref="TIC 12345",
+                tic_id=12345,
+                ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+                source="manual",
+            ),
+            light_curve_result=_light_curve_result(),
+            stellar_field=_stellar_field(),
+            transit_depth=0.001,
+            aperture_mode="default",
+            aperture_threshold_sigma=3.0,
+            custom_aperture_pixels=(),
+            bin_count=100,
+            search_radius_px=10,
+            sigma_psf_px=0.75,
+            lightcurve_config=LightCurveConfig(),
+            trilegal_population=_trilegal(),
+        )
+    )
+
+    assert "tables/stars.csv" in artifact.extra_files
+    assert "plots/field.pdf" in artifact.extra_files
+    loaded = PreparedAutoFppArtifact.from_bundle(artifact.to_bundle())
+    assert "tables/stars.csv" in loaded.extra_files
+    assert "plots/field.pdf" in loaded.extra_files
+
+
+def test_compute_outputs_are_added_and_round_trip() -> None:
+    artifact = with_preparation_outputs(
+        make_prepared_artifact(
+            resolved_target=ResolvedTarget(
+                target_ref="TIC 12345",
+                tic_id=12345,
+                ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+                source="manual",
+            ),
+            light_curve_result=_light_curve_result(),
+            stellar_field=_stellar_field(),
+            transit_depth=0.001,
+            aperture_mode="default",
+            aperture_threshold_sigma=3.0,
+            custom_aperture_pixels=(),
+            bin_count=100,
+            search_radius_px=10,
+            sigma_psf_px=0.75,
+            lightcurve_config=LightCurveConfig(),
+            trilegal_population=_trilegal(),
+        )
+    )
+    updated = with_compute_outputs(
+        artifact,
+        validation_result=ValidationResult(
+            target_id=12345,
+            false_positive_probability=0.1,
+            nearby_false_positive_probability=0.02,
+            scenario_results=[],
+        ),
+        workspace=None,  # type: ignore[arg-type]
+    )
+
+    assert "tables/scenario_probabilities.csv" in updated.extra_files
+    assert "plots/fits.pdf" in updated.extra_files
+    loaded = PreparedAutoFppArtifact.from_bundle(updated.to_bundle())
+    assert "tables/scenario_probabilities.csv" in loaded.extra_files
+    assert "plots/fits.pdf" in loaded.extra_files

@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from auto_fpp.artifacts import make_prepared_artifact
+from auto_fpp.outputs import with_preparation_outputs
 from auto_fpp.store import (
     FilesystemPreparedArtifactStore,
     R2PreparedArtifactStore,
@@ -107,6 +108,19 @@ def test_filesystem_store_uses_explicit_key(tmp_path) -> None:
         locator=str(tmp_path / "custom-key"),
         store_kind="filesystem",
     )
+
+
+def test_filesystem_store_replace_updates_existing_locator(tmp_path) -> None:
+    artifact = _artifact()
+    store = FilesystemPreparedArtifactStore(tmp_path)
+
+    ref = store.put(artifact, key="custom-key")
+    updated = with_preparation_outputs(artifact)
+    replaced = store.replace(ref, updated)
+    loaded = store.get(ref)
+
+    assert replaced == ref
+    assert "tables/stars.csv" in loaded.extra_files
 
 
 def test_default_artifact_key_includes_tic_id() -> None:
