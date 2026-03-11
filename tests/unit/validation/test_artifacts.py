@@ -12,7 +12,12 @@ from auto_fpp.artifacts import (
     default_artifact_capabilities,
     make_prepared_artifact,
 )
-from auto_fpp.outputs import with_compute_outputs, with_preparation_outputs
+from auto_fpp.models import RepeatMetricSummary, ValidationRepeatSummary
+from auto_fpp.outputs import (
+    with_compute_outputs,
+    with_preparation_outputs,
+    with_repeat_outputs,
+)
 from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
@@ -398,3 +403,57 @@ def test_compute_outputs_are_added_and_round_trip() -> None:
     assert "tables/probs.csv" in loaded.extra_files
     assert "tables/scenario_probabilities.csv" in loaded.extra_files
     assert "plots/fits.pdf" in loaded.extra_files
+
+
+def test_repeat_outputs_are_added_and_round_trip() -> None:
+    artifact = make_prepared_artifact(
+        resolved_target=ResolvedTarget(
+            target_ref="TIC 12345",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="manual",
+        ),
+        light_curve_result=_light_curve_result(),
+        stellar_field=_stellar_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=100,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+        trilegal_population=_trilegal(),
+    )
+    updated = with_repeat_outputs(
+        artifact,
+        summary=ValidationRepeatSummary(
+            repeat_n=2,
+            fpp=RepeatMetricSummary(mean=0.2, std=0.1, min=0.1, max=0.3),
+            nfpp=RepeatMetricSummary(mean=0.04, std=0.02, min=0.02, max=0.06),
+            results=(
+                ValidationResult(
+                    target_id=12345,
+                    false_positive_probability=0.1,
+                    nearby_false_positive_probability=0.02,
+                    scenario_results=[],
+                ),
+                ValidationResult(
+                    target_id=12345,
+                    false_positive_probability=0.3,
+                    nearby_false_positive_probability=0.06,
+                    scenario_results=[],
+                ),
+            ),
+        ),
+    )
+
+    assert "tables/repeat_summary.json" in updated.extra_files
+    assert "tables/repeat_summary.csv" in updated.extra_files
+    summary_json = updated.extra_files["tables/repeat_summary.json"].decode("utf-8")
+    assert "\"repeat_n\": 2" in summary_json
+    summary_csv = updated.extra_files["tables/repeat_summary.csv"].decode("utf-8")
+    assert "run_index,fpp,nfpp" in summary_csv
+    loaded = PreparedAutoFppArtifact.from_bundle(updated.to_bundle())
+    assert "tables/repeat_summary.json" in loaded.extra_files
+    assert "tables/repeat_summary.csv" in loaded.extra_files
