@@ -497,6 +497,7 @@ class ValidationWorkspace:
         plot_fits_palomar(
             self._last_external_lcs[external_lc_index],
             self._last_result,
+            reference_light_curve=self._last_light_curve,
             external_lc_index=external_lc_index,
             **kwargs,
         )

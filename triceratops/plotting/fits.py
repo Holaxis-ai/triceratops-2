@@ -139,14 +139,21 @@ def _best_fit_model(
     return np.asarray(flux)
 
 
-def _visible_scenarios(
+def _plottable_scenarios(
     validation_result: ValidationResult,
     *,
     max_per_column: int | None = None,
 ) -> list[list[ScenarioResult]]:
+    has_any_visible = any(
+        result.relative_probability >= _MIN_PROB
+        for result in validation_result.scenario_results
+    )
+    if not has_any_visible:
+        return [[], [], []]
+
     columns: list[list[ScenarioResult]] = [[], [], []]
     for result in validation_result.scenario_results:
-        if result.relative_probability < _MIN_PROB or len(result.host_mass_msun) == 0:
+        if len(result.host_mass_msun) == 0:
             continue
         column = _column_for_scenario(result.scenario_id)
         if max_per_column is not None and len(columns[column]) >= max_per_column:
@@ -222,7 +229,7 @@ def plot_fits(
     """Plot TESS best-fit models for all non-negligible scenarios."""
     from matplotlib import ticker
 
-    grouped = _visible_scenarios(validation_result)
+    grouped = _plottable_scenarios(validation_result)
     nrows = max((len(column) for column in grouped), default=0)
     if nrows == 0:
         _render_empty_plot(
@@ -247,17 +254,12 @@ def plot_fits(
                 ax.axis("off")
                 continue
             sr = column_results[row_index]
-            lc_plot = light_curve
-            fr = float(np.median(sr.flux_ratio_companion_tess))
-            if _is_companion_scenario(sr.scenario_id) and 0.0 < fr < 1.0:
-                lc_plot = light_curve.with_renorm(fr)
-
             y_formatter = ticker.ScalarFormatter(useOffset=False)
             ax.yaxis.set_major_formatter(y_formatter)
             ax.errorbar(
-                lc_plot.time_days,
-                lc_plot.flux,
-                lc_plot.flux_err,
+                light_curve.time_days,
+                light_curve.flux,
+                light_curve.flux_err,
                 fmt="o",
                 color="dodgerblue",
                 elinewidth=1.0,
@@ -289,6 +291,7 @@ def plot_fits_palomar(
     external_light_curve: ExternalLightCurve,
     validation_result: ValidationResult,
     *,
+    reference_light_curve: LightCurve | None = None,
     external_lc_index: int = 0,
     x_range: Sequence[float] | None = None,
     y_range: Sequence[float] | None = None,
@@ -300,7 +303,7 @@ def plot_fits_palomar(
     from matplotlib import ticker
 
     max_per_column = None if nrows <= 0 else nrows
-    grouped = _visible_scenarios(validation_result, max_per_column=max_per_column)
+    grouped = _plottable_scenarios(validation_result, max_per_column=max_per_column)
     panel_rows = max((len(column) for column in grouped), default=0)
     if panel_rows == 0:
         _render_empty_plot(
@@ -313,7 +316,12 @@ def plot_fits_palomar(
 
     lc = external_light_curve.light_curve
     if x_range is None or len(x_range) == 0:
-        model_time = np.linspace(float(np.min(lc.time_days)), float(np.max(lc.time_days)), 200)
+        reference_time = lc.time_days if reference_light_curve is None else reference_light_curve.time_days
+        model_time = np.linspace(
+            float(np.min(reference_time)),
+            float(np.max(reference_time)),
+            200,
+        )
     else:
         model_time = np.linspace(float(x_range[0]), float(x_range[1]), 200)
 
@@ -385,7 +393,7 @@ def plot_fits_joint(
     from matplotlib import ticker
 
     max_per_column = None if nrows <= 0 else nrows
-    grouped = _visible_scenarios(validation_result, max_per_column=max_per_column)
+    grouped = _plottable_scenarios(validation_result, max_per_column=max_per_column)
     panel_rows = max((len(column) for column in grouped), default=0)
     if panel_rows == 0:
         _render_empty_plot(
@@ -398,7 +406,11 @@ def plot_fits_joint(
 
     lc = external_light_curve.light_curve
     if x_range is None or len(x_range) == 0:
-        model_time = np.linspace(float(np.min(lc.time_days)), float(np.max(lc.time_days)), 200)
+        model_time = np.linspace(
+            float(np.min(light_curve.time_days)),
+            float(np.max(light_curve.time_days)),
+            200,
+        )
     else:
         model_time = np.linspace(float(x_range[0]), float(x_range[1]), 200)
 

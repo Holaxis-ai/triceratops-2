@@ -194,6 +194,7 @@ def _plot_tpf_field(
     """Original-style field plot using pixel coordinates and a cutout image."""
     import matplotlib.pyplot as plt
     from matplotlib import cm
+    from mpl_toolkits.axes_grid1.anchored_artists import AnchoredDirectionArrows
 
     coords = np.asarray(pixel_coords, dtype=float)
     if coords.ndim != 2 or coords.shape[1] != 2:
@@ -279,10 +280,33 @@ def _plot_tpf_field(
     axes[0].tick_params(axis="x", labelrotation=90)
     axes[0].set_ylabel("pixel row number", fontsize=12)
     axes[0].set_xlabel("pixel column number", fontsize=12)
-    axes[0].set_title(
-        "Pixel field" if sector is None else f"Sector {sector} pixel field",
-        fontsize=13,
-    )
+    if len(coords) > 1:
+        v1 = np.array([0.0, 1.0])
+        v2 = coords[1] - coords[0]
+        if np.linalg.norm(v2) > 0:
+            sign = np.sign(v2[0])
+            angle1 = sign * (
+                np.arccos(np.dot(v1, v2) / np.sqrt(np.dot(v1, v1) * np.dot(v2, v2)))
+                * 180
+                / np.pi
+            )
+            angle2 = stellar_field.stars[1].position_angle_deg
+            rot = angle1 - angle2
+            rotated_arrow = AnchoredDirectionArrows(
+                axes[0].transAxes,
+                "E",
+                "N",
+                loc="upper left",
+                color="k",
+                angle=-rot,
+                length=0.1,
+                fontsize=0.05,
+                back_length=0,
+                head_length=5,
+                head_width=5,
+                tail_width=1,
+            )
+            axes[0].add_artist(rotated_arrow)
 
     im = axes[1].imshow(
         img,
@@ -290,19 +314,15 @@ def _plot_tpf_field(
     )
     _draw_aperture_outline(axes[1], aperture, color="red")
     axes[1].set_xlim(-0.5, n_cols - 0.5)
-    axes[1].set_ylim(n_rows - 0.5, -0.5)
+    axes[1].set_ylim(-0.5, n_rows - 0.5)
     axes[1].set_xticks(centers_x)
     axes[1].set_yticks(centers_y)
     axes[1].tick_params(width=0)
     axes[1].tick_params(axis="x", labelrotation=90)
     axes[1].set_ylabel("pixel row number", fontsize=12)
     axes[1].set_xlabel("pixel column number", fontsize=12)
-    axes[1].set_title(
-        "Cutout" if sector is None else f"Sector {sector} cutout",
-        fontsize=13,
-    )
     cb2 = fig.colorbar(im, ax=axes[1], pad=0.02)
-    cb2.ax.set_ylabel("flux", rotation=270, fontsize=12, labelpad=18)
+    cb2.ax.set_ylabel("flux [e$^-$ s$^{-1}$]", rotation=270, fontsize=12, labelpad=18)
 
     plt.tight_layout()
     if save:

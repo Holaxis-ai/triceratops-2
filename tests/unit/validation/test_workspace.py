@@ -500,6 +500,7 @@ class TestPlotFitsGuard:
         self,
         workspace: ValidationWorkspace,
         monkeypatch: pytest.MonkeyPatch,
+        transit_lc: LightCurve,
         external_lc: ExternalLightCurve,
     ) -> None:
         called: dict[str, object] = {}
@@ -509,6 +510,7 @@ class TestPlotFitsGuard:
             nearby_false_positive_probability=0.0,
             scenario_results=[],
         )
+        workspace._last_light_curve = transit_lc
         workspace._last_external_lcs = [external_lc]
 
         def _fake_plot(ext_lc, result, **kwargs):
@@ -521,7 +523,11 @@ class TestPlotFitsGuard:
 
         assert called["ext_lc"] is external_lc
         assert called["result"] is workspace._last_result
-        assert called["kwargs"] == {"external_lc_index": 0, "save": True}
+        assert called["kwargs"] == {
+            "reference_light_curve": transit_lc,
+            "external_lc_index": 0,
+            "save": True,
+        }
 
     def test_plot_fits_joint_delegates(
         self,
