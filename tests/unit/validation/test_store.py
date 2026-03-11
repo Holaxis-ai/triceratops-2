@@ -8,12 +8,12 @@ from triceratops.domain.value_objects import StellarParameters
 from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.lightcurve.result import LightCurvePreparationResult
-from triceratops.validation.store import (
+from auto_fpp.store import (
     FilesystemPreparedArtifactStore,
     StoredArtifactRef,
     default_artifact_key,
 )
-from triceratops.validation.artifacts import make_prepared_artifact
+from auto_fpp.artifacts import make_prepared_artifact
 
 
 def _artifact():

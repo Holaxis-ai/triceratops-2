@@ -15,9 +15,9 @@ from triceratops.lightcurve.exofop.toi_resolution import (
     ToiResolutionResult,
 )
 from triceratops.population.protocols import TRILEGALResult
-from triceratops.validation import runner
+from auto_fpp import runner
 from triceratops.validation.errors import PreparedInputIncompleteError
-from triceratops.validation.runner import (
+from auto_fpp.runner import (
     ApertureConfig,
     AutoFppComputeConfig,
     AutoFppPrepareConfig,

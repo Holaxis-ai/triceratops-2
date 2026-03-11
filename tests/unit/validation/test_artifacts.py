@@ -10,7 +10,7 @@ from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.lightcurve.result import LightCurvePreparationResult
 from triceratops.population.protocols import TRILEGALResult
-from triceratops.validation.artifacts import (
+from auto_fpp.artifacts import (
     ARTIFACT_KIND_COMPUTE_READY,
     ARTIFACT_KIND_PREPARED,
     ApertureProvenance,

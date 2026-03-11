@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-triceratops-fpp = "triceratops.cli:main"
+triceratops-fpp = "auto_fpp.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -33,7 +33,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["triceratops*"]
+include = ["triceratops*", "auto_fpp*"]
 
 [tool.setuptools.package-data]
 "triceratops.data" = ["*.csv"]
