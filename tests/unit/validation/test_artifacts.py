@@ -15,6 +15,7 @@ from auto_fpp.artifacts import (
     SectorApertureSelection,
     default_artifact_capabilities,
     make_prepared_artifact,
+    mark_artifact_uploaded,
 )
 from auto_fpp.models import RepeatMetricSummary, ValidationRepeatSummary
 from auto_fpp.outputs import (
@@ -341,6 +342,41 @@ def test_manifest_round_trips_stage_and_history_metadata() -> None:
         "pending",
     ]
     assert loaded.history[0].stage == "trilegal"
+
+
+def test_mark_artifact_uploaded_records_store_stage() -> None:
+    artifact = make_prepared_artifact(
+        resolved_target=ResolvedTarget(
+            target_ref="TIC 12345",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="manual",
+        ),
+        light_curve_result=_light_curve_result(),
+        stellar_field=_stellar_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=None,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+    )
+
+    uploaded = mark_artifact_uploaded(
+        artifact,
+        locator="r2://science/prepared/tic-12345",
+        key="tic-12345",
+        store_kind="r2",
+        uploaded_stage="field",
+    )
+
+    store_stage = next(stage for stage in uploaded.stages if stage.name == "store_upload")
+    assert store_stage.status == "completed"
+    assert store_stage.outputs["locator"] == "r2://science/prepared/tic-12345"
+    assert store_stage.outputs["uploaded_stage"] == "field"
+    assert uploaded.history[-1].stage == "store_upload"
 
 
 def test_manifest_includes_sector_aperture_overrides() -> None:
