@@ -13,6 +13,13 @@ from unittest.mock import MagicMock
 import numpy as np
 
 
+def _ensure_pytransit_numpy_compat() -> None:
+    if not hasattr(np, "int"):
+        np.int = int
+    if not hasattr(np, "trapz"):
+        np.trapz = np.trapezoid
+
+
 class _MockQuadraticModel:
     """Minimal pytransit QuadraticModel replacement using box transits."""
 
@@ -62,6 +69,7 @@ class _MockQuadraticModel:
 
 def _install_mock_pytransit() -> None:
     """Install mock pytransit if the real one is not importable."""
+    _ensure_pytransit_numpy_compat()
     try:
         import pytransit  # noqa: F401
     except (ImportError, Exception):

@@ -15,9 +15,18 @@ from triceratops.config.config import CONST
 _local = threading.local()
 
 
+def _ensure_pytransit_numpy_compat(np_module: Any = np) -> None:
+    """Restore NumPy aliases removed in 1.24/2.x that older pytransit imports."""
+    if not hasattr(np_module, "int"):
+        np_module.int = int
+    if not hasattr(np_module, "trapz"):
+        np_module.trapz = np_module.trapezoid
+
+
 def _get_transit_model() -> Any:
     """Get (or create) the thread-local QuadraticModel for the primary transit."""
     if not hasattr(_local, "tm"):
+        _ensure_pytransit_numpy_compat()
         from pytransit import QuadraticModel
         _local.tm = QuadraticModel(interpolate=False)
     return _local.tm
@@ -26,6 +35,7 @@ def _get_transit_model() -> Any:
 def _get_secondary_transit_model() -> Any:
     """Get (or create) the thread-local QuadraticModel for secondary eclipses."""
     if not hasattr(_local, "tm_sec"):
+        _ensure_pytransit_numpy_compat()
         from pytransit import QuadraticModel
         _local.tm_sec = QuadraticModel(interpolate=False)
     return _local.tm_sec
