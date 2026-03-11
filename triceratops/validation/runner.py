@@ -38,6 +38,7 @@ from triceratops.validation.artifacts import (
     PreparedAutoFppArtifact,
     make_prepared_artifact,
 )
+from triceratops.validation.errors import PreparedInputIncompleteError
 from triceratops.validation.job import PreparedValidationInputs
 from triceratops.validation.workspace import ValidationWorkspace
 
@@ -135,7 +136,7 @@ class AutoFppPrepareConfig:
     bin_count: int | None = None
     include_unbinned_folded_lightcurve: bool = False
     include_aperture_provenance: bool = True
-    materialize_trilegal: bool = False
+    materialize_trilegal: bool = True
     exofop_cache_ttl_seconds: int = 6 * 3600
     exofop_disk_cache_dir: str | Path | None = None
 
@@ -602,7 +603,7 @@ def _run_to_prepare_config(config: FppRunConfig) -> AutoFppPrepareConfig:
         bin_count=config.bin_count,
         include_unbinned_folded_lightcurve=False,
         include_aperture_provenance=True,
-        materialize_trilegal=False,
+        materialize_trilegal=True,
         exofop_cache_ttl_seconds=config.exofop_cache_ttl_seconds,
         exofop_disk_cache_dir=config.exofop_disk_cache_dir,
     )
@@ -664,31 +665,22 @@ def _compute_prepared_artifact(
         )
         return result, workspace
 
-    if _scenarios_require_trilegal(requested_scenarios) and prepared.trilegal_population is None:
-        prepared_inputs = workspace.prepare(
-            light_curve=prepared.light_curve_result.light_curve,
-            period_days=prepared.resolved_target.ephemeris.period_days,
-            scenario_ids=requested_scenarios,
+    if prepared.trilegal_population is None:
+        raise PreparedInputIncompleteError(
+            "Prepared auto-FPP artifact is missing trilegal_population. "
+            "auto-FPP compute requires a compute-ready artifact produced with "
+            "TRILEGAL materialized during preparation."
         )
-    else:
-        prepared_inputs = PreparedValidationInputs(
-            target_id=prepared.resolved_target.tic_id,
-            stellar_field=workspace.fetch_catalog(),
-            light_curve=prepared.light_curve_result.light_curve,
-            config=config.compute,
-            period_days=prepared.resolved_target.ephemeris.period_days,
-            trilegal_population=prepared.trilegal_population,
-            scenario_ids=requested_scenarios,
-        )
+    prepared_inputs = PreparedValidationInputs(
+        target_id=prepared.resolved_target.tic_id,
+        stellar_field=workspace.fetch_catalog(),
+        light_curve=prepared.light_curve_result.light_curve,
+        config=config.compute,
+        period_days=prepared.resolved_target.ephemeris.period_days,
+        trilegal_population=prepared.trilegal_population,
+        scenario_ids=requested_scenarios,
+    )
     return workspace.compute_prepared(prepared_inputs), workspace
-
-
-def _scenarios_require_trilegal(
-    scenario_ids: list[ScenarioID] | None,
-) -> bool:
-    if scenario_ids is None:
-        return True
-    return any(sid in ScenarioID.trilegal_scenarios() for sid in scenario_ids)
 
 
 __all__ = [

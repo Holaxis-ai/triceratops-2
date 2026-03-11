@@ -16,6 +16,7 @@ from triceratops.lightcurve.exofop.toi_resolution import (
 )
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.validation import runner
+from triceratops.validation.errors import PreparedInputIncompleteError
 from triceratops.validation.runner import (
     ApertureConfig,
     AutoFppComputeConfig,
@@ -137,6 +138,20 @@ class StubWorkspace:
             light_curve=light_curve,
             config=Config(),
             period_days=period_days,
+            trilegal_population=TRILEGALResult(
+                tmags=np.array([10.0]),
+                masses=np.array([1.0]),
+                loggs=np.array([4.4]),
+                teffs=np.array([5500.0]),
+                metallicities=np.array([0.0]),
+                jmags=np.array([9.0]),
+                hmags=np.array([8.9]),
+                kmags=np.array([8.8]),
+                gmags=np.array([10.1]),
+                rmags=np.array([10.0]),
+                imags=np.array([9.9]),
+                zmags=np.array([9.8]),
+            ),
             scenario_ids=scenario_ids,
         )
 
@@ -317,6 +332,36 @@ def test_compute_auto_fpp_uses_provider_free_path_when_artifact_is_compute_ready
     assert result.fpp == pytest.approx(0.12)
     assert StubWorkspace.instances[0].prepare_args is None
     assert StubWorkspace.instances[0].compute_prepared_args is not None
+
+
+def test_compute_auto_fpp_rejects_artifact_without_trilegal(monkeypatch) -> None:
+    StubWorkspace.instances.clear()
+    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+
+    artifact = runner.make_prepared_artifact(
+        resolved_target=runner.ResolvedTarget(
+            target_ref="TOI-123.01",
+            tic_id=12345,
+            ephemeris=runner.Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="test",
+        ),
+        light_curve_result=_lc_result(),
+        stellar_field=_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=100,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=runner.LightCurveConfig(),
+    )
+
+    with pytest.raises(PreparedInputIncompleteError, match="trilegal_population"):
+        compute_auto_fpp(
+            artifact,
+            config=AutoFppComputeConfig(scenario_ids=(ScenarioID.TP,)),
+        )
 
 
 class FakeTpf:
