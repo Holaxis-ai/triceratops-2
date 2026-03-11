@@ -9,3 +9,6 @@ build/
 .coverage
 .ruff_cache/
 working_docs/
+.env
+.env.*
+!.env.example
