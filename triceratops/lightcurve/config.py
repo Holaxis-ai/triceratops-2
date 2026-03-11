@@ -23,7 +23,7 @@ class LightCurveConfig:
     # --- advanced parameters ---
     flatten_window_length: int = 401
     flatten_polyorder: int = 3
-    phase_window_factor: float = 5.0
+    phase_window_factor: float = 2.0
     flux_type: Literal["pdcsap_flux", "sap_flux"] = "pdcsap_flux"
     cadence_days_override: float | None = None
     supersampling_rate: int = 20
