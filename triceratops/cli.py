@@ -21,6 +21,7 @@ from triceratops.validation.runner import (
     run_tess_fpp,
 )
 from triceratops.validation.artifacts import PreparedAutoFppArtifact
+from triceratops.validation.errors import PreparedInputIncompleteError
 from triceratops.validation.store import (
     FilesystemPreparedArtifactStore,
     StoredArtifactRef,
@@ -37,6 +38,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             config=_build_prepare_config(args),
             ephemeris=_build_ephemeris(args),
         )
+        if artifact.trilegal_population is None:
+            raise PreparedInputIncompleteError(
+                "prepare did not produce a compute-ready auto-FPP artifact: "
+                "trilegal_population is missing."
+            )
         store = FilesystemPreparedArtifactStore(
             base_dir=_prepare_store_base_dir(args.output)
         )

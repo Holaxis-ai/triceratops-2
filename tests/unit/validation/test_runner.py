@@ -287,6 +287,65 @@ def test_prepare_auto_fpp_materializes_trilegal_when_requested(monkeypatch) -> N
     assert StubWorkspace.instances[0].prepare_args is not None
 
 
+def test_prepare_auto_fpp_fails_if_trilegal_is_not_materialized(monkeypatch) -> None:
+    class NoTrilegalWorkspace(StubWorkspace):
+        def prepare(
+            self,
+            light_curve: LightCurve,
+            period_days: float,
+            scenario_ids: list[ScenarioID] | None = None,
+        ):
+            self.prepare_args = (light_curve, period_days, scenario_ids)
+            from triceratops.validation.job import PreparedValidationInputs
+
+            return PreparedValidationInputs(
+                target_id=self.tic_id,
+                stellar_field=self.field,
+                light_curve=light_curve,
+                config=Config(),
+                period_days=period_days,
+                trilegal_population=None,
+                scenario_ids=scenario_ids,
+            )
+
+    StubWorkspace.instances.clear()
+    monkeypatch.setattr(runner, "ValidationWorkspace", NoTrilegalWorkspace)
+    monkeypatch.setattr(
+        runner,
+        "resolve_toi_to_tic_ephemeris_depth",
+        lambda target, cache_ttl_seconds, disk_cache_dir: ToiResolutionResult(
+            status=LookupStatus.OK,
+            toi_query=str(target),
+            tic_id=12345,
+            matched_toi="123.01",
+            period_days=5.0,
+            t0_btjd=1000.0,
+            duration_hours=2.0,
+            depth_ppm=2500.0,
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_prepare_tpf_lightcurve",
+        lambda target, config: runner._PreparedApertureLightCurve(
+            light_curve_result=_lc_result(),
+            aperture_masks=(np.array([[True, False], [False, True]]),),
+            tpfs=("fake",),
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_derive_sector_geometry",
+        lambda tpfs, masks, field, search_radius_px: (
+            [np.array([[0.0, 0.0]])],
+            [np.array([[0.0, 0.0], [1.0, 1.0]])],
+        ),
+    )
+
+    with pytest.raises(PreparedInputIncompleteError, match="trilegal_population"):
+        prepare_auto_fpp("TOI-123.01")
+
+
 def test_compute_auto_fpp_uses_provider_free_path_when_artifact_is_compute_ready(monkeypatch) -> None:
     StubWorkspace.instances.clear()
     monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)

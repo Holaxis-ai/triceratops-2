@@ -201,12 +201,23 @@ def prepare_auto_fpp(
         **prepare_kwargs,
     )
 
-    workspace = ValidationWorkspace(
-        tic_id=resolved_target.tic_id,
-        sectors=np.asarray(prepared_lc.light_curve_result.sectors_used, dtype=int),
-        mission="TESS",
-        search_radius=cfg.search_radius_px,
-    )
+    workspace_kwargs = {
+        "tic_id": resolved_target.tic_id,
+        "sectors": np.asarray(prepared_lc.light_curve_result.sectors_used, dtype=int),
+        "mission": "TESS",
+        "search_radius": cfg.search_radius_px,
+    }
+    if cfg.materialize_trilegal:
+        from triceratops.population.trilegal_provider import TRILEGALProvider
+
+        workspace_kwargs["population_provider"] = TRILEGALProvider()
+    try:
+        workspace = ValidationWorkspace(**workspace_kwargs)
+    except TypeError as exc:
+        if "population_provider" not in str(exc):
+            raise
+        workspace_kwargs.pop("population_provider", None)
+        workspace = ValidationWorkspace(**workspace_kwargs)
     workspace.set_resolved_target(resolved_target)
     field = workspace.fetch_catalog()
     pixel_coords_per_sector, aperture_pixels_per_sector = _derive_sector_geometry(
@@ -229,6 +240,12 @@ def prepare_auto_fpp(
             period_days=resolved_target.ephemeris.period_days,
         )
         trilegal_population = prepared_inputs.trilegal_population
+        if trilegal_population is None:
+            raise PreparedInputIncompleteError(
+                "auto-FPP preparation requires TRILEGAL, but no trilegal_population "
+                "was materialized. Ensure a population provider is configured and "
+                "the TRILEGAL query succeeds."
+            )
 
     aperture_provenance = None
     if cfg.include_aperture_provenance:
