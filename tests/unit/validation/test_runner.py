@@ -9,13 +9,18 @@ from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.result import ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.lightcurve.ephemeris import Ephemeris
+from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.result import LightCurvePreparationResult
 from triceratops.lightcurve.exofop.toi_resolution import (
     LookupStatus,
     ToiResolutionResult,
 )
 from triceratops.population.protocols import TRILEGALResult
+import auto_fpp.compute as compute_stage
+import auto_fpp.field as field_stage
+import auto_fpp.lightcurve as lightcurve_stage
 from auto_fpp import runner
+import auto_fpp.target as target_stage
 from triceratops.validation.errors import PreparedInputIncompleteError
 from auto_fpp.runner import (
     ApertureConfig,
@@ -172,9 +177,10 @@ class StubWorkspace:
 
 def test_run_tess_fpp_orchestrates_end_to_end(monkeypatch) -> None:
     StubWorkspace.instances.clear()
-    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+    monkeypatch.setattr(field_stage, "ValidationWorkspace", StubWorkspace)
+    monkeypatch.setattr(compute_stage, "ValidationWorkspace", StubWorkspace)
     monkeypatch.setattr(
-        runner,
+        target_stage,
         "resolve_toi_to_tic_ephemeris_depth",
         lambda target, cache_ttl_seconds, disk_cache_dir: ToiResolutionResult(
             status=LookupStatus.OK,
@@ -188,9 +194,9 @@ def test_run_tess_fpp_orchestrates_end_to_end(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        runner,
+        lightcurve_stage,
         "_prepare_tpf_lightcurve",
-        lambda target, config: runner._PreparedApertureLightCurve(
+        lambda target, config: runner.AutoFppPreparedLightCurve(
             light_curve_result=_lc_result(),
             aperture_masks=(np.array([[True, False], [False, True]]),),
             tpfs=("fake",),
@@ -199,7 +205,7 @@ def test_run_tess_fpp_orchestrates_end_to_end(monkeypatch) -> None:
     pixel_coords = [np.array([[0.0, 0.0]])]
     aperture_pixels = [np.array([[0.0, 0.0], [1.0, 1.0]])]
     monkeypatch.setattr(
-        runner,
+        field_stage,
         "_derive_sector_geometry",
         lambda tpfs, masks, field, search_radius_px: (pixel_coords, aperture_pixels),
     )
@@ -254,9 +260,9 @@ def test_run_tess_fpp_requires_manual_inputs_for_tic() -> None:
 
 def test_prepare_auto_fpp_materializes_trilegal_when_requested(monkeypatch) -> None:
     StubWorkspace.instances.clear()
-    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+    monkeypatch.setattr(field_stage, "ValidationWorkspace", StubWorkspace)
     monkeypatch.setattr(
-        runner,
+        target_stage,
         "resolve_toi_to_tic_ephemeris_depth",
         lambda target, cache_ttl_seconds, disk_cache_dir: ToiResolutionResult(
             status=LookupStatus.OK,
@@ -270,16 +276,16 @@ def test_prepare_auto_fpp_materializes_trilegal_when_requested(monkeypatch) -> N
         ),
     )
     monkeypatch.setattr(
-        runner,
+        lightcurve_stage,
         "_prepare_tpf_lightcurve",
-        lambda target, config: runner._PreparedApertureLightCurve(
+        lambda target, config: runner.AutoFppPreparedLightCurve(
             light_curve_result=_lc_result(),
             aperture_masks=(np.array([[True, False], [False, True]]),),
             tpfs=("fake",),
         ),
     )
     monkeypatch.setattr(
-        runner,
+        field_stage,
         "_derive_sector_geometry",
         lambda tpfs, masks, field, search_radius_px: (
             [np.array([[0.0, 0.0]])],
@@ -298,9 +304,9 @@ def test_prepare_auto_fpp_materializes_trilegal_when_requested(monkeypatch) -> N
 
 def test_prepare_stages_compose_into_artifact(monkeypatch) -> None:
     StubWorkspace.instances.clear()
-    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+    monkeypatch.setattr(field_stage, "ValidationWorkspace", StubWorkspace)
     monkeypatch.setattr(
-        runner,
+        target_stage,
         "resolve_toi_to_tic_ephemeris_depth",
         lambda target, cache_ttl_seconds, disk_cache_dir: ToiResolutionResult(
             status=LookupStatus.OK,
@@ -314,7 +320,7 @@ def test_prepare_stages_compose_into_artifact(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        runner,
+        lightcurve_stage,
         "_prepare_tpf_lightcurve",
         lambda target, config: runner.AutoFppPreparedLightCurve(
             light_curve_result=_lc_result(),
@@ -325,7 +331,7 @@ def test_prepare_stages_compose_into_artifact(monkeypatch) -> None:
     pixel_coords = [np.array([[0.0, 0.0]])]
     aperture_pixels = [np.array([[0.0, 0.0], [1.0, 1.0]])]
     monkeypatch.setattr(
-        runner,
+        field_stage,
         "_derive_sector_geometry",
         lambda tpfs, masks, field, search_radius_px: (pixel_coords, aperture_pixels),
     )
@@ -384,9 +390,9 @@ def test_prepare_auto_fpp_fails_if_trilegal_is_not_materialized(monkeypatch) -> 
             )
 
     StubWorkspace.instances.clear()
-    monkeypatch.setattr(runner, "ValidationWorkspace", NoTrilegalWorkspace)
+    monkeypatch.setattr(field_stage, "ValidationWorkspace", NoTrilegalWorkspace)
     monkeypatch.setattr(
-        runner,
+        target_stage,
         "resolve_toi_to_tic_ephemeris_depth",
         lambda target, cache_ttl_seconds, disk_cache_dir: ToiResolutionResult(
             status=LookupStatus.OK,
@@ -400,16 +406,16 @@ def test_prepare_auto_fpp_fails_if_trilegal_is_not_materialized(monkeypatch) -> 
         ),
     )
     monkeypatch.setattr(
-        runner,
+        lightcurve_stage,
         "_prepare_tpf_lightcurve",
-        lambda target, config: runner._PreparedApertureLightCurve(
+        lambda target, config: runner.AutoFppPreparedLightCurve(
             light_curve_result=_lc_result(),
             aperture_masks=(np.array([[True, False], [False, True]]),),
             tpfs=("fake",),
         ),
     )
     monkeypatch.setattr(
-        runner,
+        field_stage,
         "_derive_sector_geometry",
         lambda tpfs, masks, field, search_radius_px: (
             [np.array([[0.0, 0.0]])],
@@ -423,13 +429,13 @@ def test_prepare_auto_fpp_fails_if_trilegal_is_not_materialized(monkeypatch) -> 
 
 def test_compute_auto_fpp_uses_provider_free_path_when_artifact_is_compute_ready(monkeypatch) -> None:
     StubWorkspace.instances.clear()
-    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+    monkeypatch.setattr(compute_stage, "ValidationWorkspace", StubWorkspace)
 
     artifact = runner.make_prepared_artifact(
-        resolved_target=runner.ResolvedTarget(
+        resolved_target=target_stage.ResolvedTarget(
             target_ref="TOI-123.01",
             tic_id=12345,
-            ephemeris=runner.Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            ephemeris=target_stage.Ephemeris(period_days=5.0, t0_btjd=1000.0),
             source="test",
         ),
         light_curve_result=_lc_result(),
@@ -441,7 +447,7 @@ def test_compute_auto_fpp_uses_provider_free_path_when_artifact_is_compute_ready
         bin_count=100,
         search_radius_px=10,
         sigma_psf_px=0.75,
-        lightcurve_config=runner.LightCurveConfig(),
+        lightcurve_config=LightCurveConfig(),
         trilegal_population=TRILEGALResult(
             tmags=np.array([10.0]),
             masses=np.array([1.0]),
@@ -470,13 +476,13 @@ def test_compute_auto_fpp_uses_provider_free_path_when_artifact_is_compute_ready
 
 def test_compute_auto_fpp_rejects_artifact_without_trilegal(monkeypatch) -> None:
     StubWorkspace.instances.clear()
-    monkeypatch.setattr(runner, "ValidationWorkspace", StubWorkspace)
+    monkeypatch.setattr(compute_stage, "ValidationWorkspace", StubWorkspace)
 
     artifact = runner.make_prepared_artifact(
-        resolved_target=runner.ResolvedTarget(
+        resolved_target=target_stage.ResolvedTarget(
             target_ref="TOI-123.01",
             tic_id=12345,
-            ephemeris=runner.Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            ephemeris=target_stage.Ephemeris(period_days=5.0, t0_btjd=1000.0),
             source="test",
         ),
         light_curve_result=_lc_result(),
@@ -488,7 +494,7 @@ def test_compute_auto_fpp_rejects_artifact_without_trilegal(monkeypatch) -> None
         bin_count=100,
         search_radius_px=10,
         sigma_psf_px=0.75,
-        lightcurve_config=runner.LightCurveConfig(),
+        lightcurve_config=LightCurveConfig(),
     )
 
     with pytest.raises(PreparedInputIncompleteError, match="trilegal_population"):
@@ -509,19 +515,19 @@ class FakeTpf:
 
 def test_resolve_aperture_mask_uses_pipeline_for_default() -> None:
     tpf = FakeTpf(np.array([[True, False], [False, False]]))
-    mask = runner._resolve_aperture_mask(tpf, ApertureConfig())
+    mask = lightcurve_stage._resolve_aperture_mask(tpf, ApertureConfig())
     np.testing.assert_array_equal(mask, np.array([[True, False], [False, False]]))
 
 
 def test_resolve_aperture_mask_falls_back_to_threshold() -> None:
     tpf = FakeTpf(np.array([[False, False], [False, False]]))
-    mask = runner._resolve_aperture_mask(tpf, ApertureConfig(mode="default"))
+    mask = lightcurve_stage._resolve_aperture_mask(tpf, ApertureConfig(mode="default"))
     np.testing.assert_array_equal(mask, np.array([[False, True], [True, False]]))
 
 
 def test_resolve_aperture_mask_builds_custom_mask() -> None:
     tpf = FakeTpf(np.array([[False, False], [False, False]]))
-    mask = runner._resolve_aperture_mask(
+    mask = lightcurve_stage._resolve_aperture_mask(
         tpf,
         ApertureConfig(mode="custom", custom_pixels=((0, 1), (1, 0))),
     )
