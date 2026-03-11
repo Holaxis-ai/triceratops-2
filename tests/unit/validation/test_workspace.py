@@ -182,7 +182,9 @@ class TestWorkspaceConstruction:
         which wraps catalog errors in CatalogAcquisitionError."""
 
         class _BoomCatalog:
-            def query_nearby_stars(self, **kwargs: object) -> object:
+            def query_nearby_stars(
+                self, tic_id: int, search_radius_px: int, mission: str,
+            ) -> StellarField:
                 raise RuntimeError("boom")
 
         ws = ValidationWorkspace(
@@ -345,6 +347,7 @@ class TestComputeProbsScenarioIdsPath:
 
         # Trigger lazy fetch so _stellar_field is populated, then corrupt it
         _ = ws.stars
+        assert ws._stellar_field is not None
         wrong_star = _neighbor_star(tic_id=99999999)
         ws._stellar_field.stars[0] = wrong_star  # direct corruption — bypasses guards
 
