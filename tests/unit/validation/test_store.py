@@ -2,20 +2,24 @@
 from __future__ import annotations
 
 import io
+import subprocess
+from pathlib import Path
+
 import numpy as np
 
+from auto_fpp.artifacts import make_prepared_artifact
+from auto_fpp.store import (
+    FilesystemPreparedArtifactStore,
+    R2PreparedArtifactStore,
+    StoredArtifactRef,
+    WranglerPreparedArtifactStore,
+    default_artifact_key,
+)
 from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.value_objects import StellarParameters
 from triceratops.lightcurve.config import LightCurveConfig
 from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.lightcurve.result import LightCurvePreparationResult
-from auto_fpp.store import (
-    FilesystemPreparedArtifactStore,
-    R2PreparedArtifactStore,
-    StoredArtifactRef,
-    default_artifact_key,
-)
-from auto_fpp.artifacts import make_prepared_artifact
 
 
 def _artifact():
@@ -169,3 +173,84 @@ def test_r2_store_rejects_non_r2_ref() -> None:
         assert "store_kind='filesystem'" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("Expected ValueError for non-R2 ref")
+
+
+class _FakeWranglerRunner:
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+        self.commands: list[list[str]] = []
+
+    def __call__(
+        self,
+        cmd,
+        *,
+        check,
+        cwd,
+        stdout,
+        stderr,
+        text,
+    ) -> subprocess.CompletedProcess[str]:
+        self.commands.append(list(cmd))
+        if cmd[1:4] != ["r2", "object", "put"] and cmd[1:4] != ["r2", "object", "get"]:
+            raise AssertionError(f"Unexpected wrangler command: {cmd}")
+        if cmd[1:4] == ["r2", "object", "put"]:
+            object_path = cmd[4]
+            file_path = Path(cmd[cmd.index("--file") + 1])
+            self.objects[object_path] = file_path.read_bytes()
+        else:
+            object_path = cmd[4]
+            file_path = Path(cmd[cmd.index("--file") + 1])
+            file_path.write_bytes(self.objects[object_path])
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+
+def test_wrangler_store_put_and_get_round_trip() -> None:
+    artifact = _artifact()
+    runner = _FakeWranglerRunner()
+    store = WranglerPreparedArtifactStore(
+        bucket="science-artifacts",
+        key_prefix="prepared",
+        runner=runner,
+    )
+
+    ref = store.put(artifact, key="tic-12345")
+    loaded = store.get(ref)
+
+    assert ref == StoredArtifactRef(
+        key="tic-12345",
+        locator="wrangler-r2://science-artifacts/prepared/tic-12345",
+        store_kind="wrangler",
+    )
+    assert any(
+        command[:5]
+        == [
+            "wrangler",
+            "r2",
+            "object",
+            "put",
+            "science-artifacts/prepared/tic-12345/manifest.json",
+        ]
+        for command in runner.commands
+    )
+    np.testing.assert_allclose(
+        loaded.light_curve_result.light_curve.time_days,
+        artifact.light_curve_result.light_curve.time_days,
+    )
+    assert loaded.resolved_target.tic_id == artifact.resolved_target.tic_id
+
+
+def test_wrangler_store_rejects_non_wrangler_ref() -> None:
+    store = WranglerPreparedArtifactStore(bucket="science-artifacts", runner=_FakeWranglerRunner())
+
+    try:
+        store.get(
+            StoredArtifactRef(
+                key="artifact",
+                locator="r2://science/artifact",
+                store_kind="r2",
+            )
+        )
+    except ValueError as exc:
+        assert "store_kind='r2'" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("Expected ValueError for non-Wrangler ref")
