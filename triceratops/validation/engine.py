@@ -214,6 +214,9 @@ class ValidationEngine:
         Returns:
             ValidationResult with FPP, NFPP, and per-scenario results.
         """
+        if config.seed is not None:
+            np.random.seed(config.seed)
+
         if scenario_ids is None:
             scenarios_to_run = self._registry.all_scenarios()
             has_nearby_candidate = any(
@@ -303,7 +306,12 @@ class ValidationEngine:
                     all_results.extend(outcome.results)
                     all_warnings.extend(outcome.warnings)
 
-        return self._aggregate(all_results, stellar_field.target_id, warnings=all_warnings)
+        return self._aggregate(
+            all_results,
+            stellar_field.target_id,
+            warnings=all_warnings,
+            rng_seed=config.seed,
+        )
 
     def compute_prepared(self, prepared: PreparedValidationInputs) -> ValidationResult:
         """Provider-free compute entrypoint.
@@ -421,14 +429,16 @@ class ValidationEngine:
         results: list[ScenarioResult],
         target_id: int,
         warnings: list[str] | None = None,
+        rng_seed: int | None = None,
     ) -> ValidationResult:
-        return _aggregate(results, target_id, warnings=warnings)
+        return _aggregate(results, target_id, warnings=warnings, rng_seed=rng_seed)
 
 
 def _aggregate(
     results: list[ScenarioResult],
     target_id: int,
     warnings: list[str] | None = None,
+    rng_seed: int | None = None,
 ) -> ValidationResult:
     """Compute relative probabilities, FPP, and NFPP.
 
@@ -442,6 +452,7 @@ def _aggregate(
             nearby_false_positive_probability=0.0,
             scenario_results=[],
             warnings=[] if warnings is None else list(warnings),
+            rng_seed=rng_seed,
         )
 
     lnZ_vals = np.array([r.ln_evidence for r in results])
@@ -479,4 +490,5 @@ def _aggregate(
         nearby_false_positive_probability=nfpp,
         scenario_results=results,
         warnings=[] if warnings is None else list(warnings),
+        rng_seed=rng_seed,
     )

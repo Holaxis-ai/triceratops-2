@@ -65,6 +65,7 @@ class ValidationResult:
     nearby_false_positive_probability: float  # NFPP = sum of N-scenario probabilities
     scenario_results: list[ScenarioResult]  # all scenarios run, in order
     warnings: list[str] = field(default_factory=list)
+    rng_seed: int | None = None
 
     @property
     def fpp(self) -> float:

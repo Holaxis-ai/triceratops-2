@@ -110,6 +110,7 @@ class Config:
         n_mc_samples: Number of Monte Carlo draws per scenario (was ``N`` in original).
         n_best_samples: Number of top-likelihood draws to retain for best-fit
             parameter reporting (was ``N_samples = 1000`` in the accumulation block).
+        seed: Optional NumPy RNG seed. When set, compute runs are reproducible.
         parallel: If True, use vectorized (masked array) likelihood evaluation.
             If False, use the serial per-sample loop. Original default: True.
         flat_priors: If True, draw planet radii uniformly instead of using the
@@ -119,6 +120,7 @@ class Config:
 
     n_mc_samples: int = 1_000_000
     n_best_samples: int = 1000
+    seed: int | None = None
     parallel: bool = True
     flat_priors: bool = False
     mission: str = "TESS"
@@ -146,6 +148,8 @@ class Config:
                 f"n_best_samples ({self.n_best_samples}) cannot exceed "
                 f"n_mc_samples ({self.n_mc_samples})"
             )
+        if self.seed is not None and self.seed < 0:
+            raise ValueError(f"seed must be >= 0 or None, got {self.seed}")
         if self.mission not in ("TESS", "Kepler", "K2"):
             raise ValueError(f"Unknown mission {self.mission!r}")
         if self.n_workers < -1:
