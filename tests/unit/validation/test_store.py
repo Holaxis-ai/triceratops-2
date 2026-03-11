@@ -1,6 +1,7 @@
 """Tests for prepared artifact stores."""
 from __future__ import annotations
 
+import io
 import numpy as np
 
 from triceratops.domain.entities import LightCurve, Star, StellarField
@@ -10,6 +11,7 @@ from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.lightcurve.result import LightCurvePreparationResult
 from auto_fpp.store import (
     FilesystemPreparedArtifactStore,
+    R2PreparedArtifactStore,
     StoredArtifactRef,
     default_artifact_key,
 )
@@ -107,3 +109,63 @@ def test_default_artifact_key_includes_tic_id() -> None:
     artifact = _artifact()
     key = default_artifact_key(artifact)
     assert key.startswith("auto-fpp-tic12345-")
+
+
+class _FakeR2Client:
+    def __init__(self) -> None:
+        self.objects: dict[tuple[str, str], bytes] = {}
+        self.content_types: dict[tuple[str, str], str] = {}
+
+    def put_object(self, *, Bucket: str, Key: str, Body: bytes, ContentType: str) -> None:
+        self.objects[(Bucket, Key)] = Body
+        self.content_types[(Bucket, Key)] = ContentType
+
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, io.BytesIO]:
+        return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
+
+
+def test_r2_store_put_and_get_round_trip() -> None:
+    artifact = _artifact()
+    client = _FakeR2Client()
+    store = R2PreparedArtifactStore(
+        bucket="science-artifacts",
+        key_prefix="prepared",
+        client=client,
+    )
+
+    ref = store.put(artifact, key="tic-12345")
+    loaded = store.get(ref)
+
+    assert ref == StoredArtifactRef(
+        key="tic-12345",
+        locator="r2://science-artifacts/prepared/tic-12345",
+        store_kind="r2",
+    )
+    assert (
+        client.content_types[
+            ("science-artifacts", "prepared/tic-12345/manifest.json")
+        ]
+        == "application/json"
+    )
+    np.testing.assert_allclose(
+        loaded.light_curve_result.light_curve.time_days,
+        artifact.light_curve_result.light_curve.time_days,
+    )
+    assert loaded.resolved_target.tic_id == artifact.resolved_target.tic_id
+
+
+def test_r2_store_rejects_non_r2_ref() -> None:
+    store = R2PreparedArtifactStore(bucket="science-artifacts", client=_FakeR2Client())
+
+    try:
+        store.get(
+            StoredArtifactRef(
+                key="artifact",
+                locator="/tmp/artifact",
+                store_kind="filesystem",
+            )
+        )
+    except ValueError as exc:
+        assert "store_kind='filesystem'" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("Expected ValueError for non-R2 ref")
