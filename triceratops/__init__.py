@@ -12,6 +12,7 @@ from triceratops.validation import (
     ValidationEngine,
     ValidationPreparer,
     ValidationWorkspace,
+    probs_dataframe,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "ScenarioID",
     "plot_field",
     "plot_fits",
+    "probs_dataframe",
 ]

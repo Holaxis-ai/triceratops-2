@@ -1,10 +1,4 @@
-"""Stellar field plot: star positions relative to the target with search radius.
-
-Implements a simplified version of the original plot_field() that uses
-angular coordinates (separation_arcsec, position_angle_deg) instead of
-pixel-grid coordinates, since pixel-grid data is not available in the
-new domain objects.
-"""
+"""Stellar field plotting, including original-style TPF/cutout views."""
 from __future__ import annotations
 
 from math import ceil, floor
@@ -19,13 +13,18 @@ def plot_field(
     search_radius_px: int | float,
     save: bool = False,
     fname: str | None = None,
+    *,
+    pixel_coords: np.ndarray | None = None,
+    aperture_pixels: np.ndarray | None = None,
+    image: np.ndarray | None = None,
+    sector: int | None = None,
 ) -> None:
     """Plot star positions in the photometric field around the target.
 
-    Displays neighbor star positions relative to the target in angular
-    coordinates (arcsec), colour-coded by TESS magnitude, with a dashed
-    circle marking the search radius.  The target star is shown as a
-    larger star marker.
+    When ``pixel_coords`` and ``image`` are supplied, this renders an
+    original-style TRICERATOPS-plus field plot with a pixel-grid view and
+    a sector cutout view. Otherwise it falls back to the simplified
+    sky-coordinate field plot.
 
     Args:
         stellar_field: StellarField containing the target and all neighbour
@@ -36,7 +35,42 @@ def plot_field(
         fname: Output filename (without extension).  Ignored when ``save``
             is False.  If ``save`` is True and ``fname`` is None, a default
             name ``TIC<id>_field.pdf`` is used.
+        pixel_coords: Optional per-star pixel coordinates shaped ``(N, 2)``
+            as ``(col, row)`` for original-style field plots.
+        aperture_pixels: Optional aperture pixel coordinates shaped ``(M, 2)``
+            as ``(col, row)``.
+        image: Optional sector cutout image shaped ``(rows, cols)``.
+        sector: Optional sector label for the title/default filename.
     """
+    if pixel_coords is not None and image is not None:
+        _plot_tpf_field(
+            stellar_field,
+            search_radius_px,
+            pixel_coords=pixel_coords,
+            aperture_pixels=aperture_pixels,
+            image=image,
+            sector=sector,
+            save=save,
+            fname=fname,
+        )
+        return
+
+    _plot_angular_field(
+        stellar_field,
+        search_radius_px,
+        save=save,
+        fname=fname,
+    )
+
+
+def _plot_angular_field(
+    stellar_field: StellarField,
+    search_radius_px: int | float,
+    *,
+    save: bool = False,
+    fname: str | None = None,
+) -> None:
+    """Simplified sky-coordinate field plot."""
     import matplotlib.pyplot as plt
     from matplotlib import cm
 
@@ -144,3 +178,146 @@ def plot_field(
         plt.tight_layout()
         plt.show()
     plt.close(fig)
+
+
+def _plot_tpf_field(
+    stellar_field: StellarField,
+    search_radius_px: int | float,
+    *,
+    pixel_coords: np.ndarray,
+    aperture_pixels: np.ndarray | None,
+    image: np.ndarray,
+    sector: int | None,
+    save: bool,
+    fname: str | None,
+) -> None:
+    """Original-style field plot using pixel coordinates and a cutout image."""
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+
+    coords = np.asarray(pixel_coords, dtype=float)
+    if coords.ndim != 2 or coords.shape[1] != 2:
+        raise ValueError(
+            f"pixel_coords must have shape (N, 2), got {coords.shape}"
+        )
+    img = np.asarray(image, dtype=float)
+    if img.ndim != 2:
+        raise ValueError(f"image must have shape (rows, cols), got {img.shape}")
+    aperture = (
+        np.empty((0, 2), dtype=float)
+        if aperture_pixels is None
+        else np.asarray(aperture_pixels, dtype=float)
+    )
+
+    n_rows, n_cols = img.shape
+    corners_x = np.arange(-0.5, n_cols + 0.5, 1.0)
+    corners_y = np.arange(-0.5, n_rows + 0.5, 1.0)
+    centers_x = np.arange(0, n_cols, 1.0)
+    centers_y = np.arange(0, n_rows, 1.0)
+    tmags = np.array([star.tmag for star in stellar_field.stars], dtype=float)
+    vmin = floor(float(np.nanmin(tmags)))
+    vmax = ceil(float(np.nanmax(tmags)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
+    plt.subplots_adjust(right=0.9)
+
+    _draw_aperture_outline(axes[0], aperture, color="red")
+    for x in corners_x:
+        axes[0].plot(np.full_like(corners_y, x), corners_y, "k-", lw=0.5, zorder=0)
+    for y in corners_y:
+        axes[0].plot(corners_x, np.full_like(corners_x, y), "k-", lw=0.5, zorder=0)
+
+    theta = np.linspace(0, 2 * np.pi, 200)
+    axes[0].plot(
+        coords[0, 0] + search_radius_px * np.cos(theta),
+        coords[0, 1] + search_radius_px * np.sin(theta),
+        "k--",
+        alpha=0.5,
+        zorder=0,
+    )
+
+    if len(coords) > 1:
+        sc = axes[0].scatter(
+            coords[1:, 0],
+            coords[1:, 1],
+            c=tmags[1:],
+            s=75,
+            edgecolors="k",
+            cmap=cm.viridis_r,
+            vmin=vmin,
+            vmax=vmax,
+            zorder=2,
+            rasterized=True,
+        )
+    else:
+        sc = axes[0].scatter(
+            [], [],
+            c=[],
+            cmap=cm.viridis_r,
+            vmin=vmin,
+            vmax=vmax,
+        )
+    axes[0].scatter(
+        [coords[0, 0]],
+        [coords[0, 1]],
+        c=[tmags[0]],
+        s=250,
+        marker="*",
+        edgecolors="k",
+        cmap=cm.viridis_r,
+        vmin=vmin,
+        vmax=vmax,
+        zorder=3,
+    )
+    cb1 = fig.colorbar(sc, ax=axes[0], pad=0.02)
+    cb1.ax.set_ylabel("TESS mag", rotation=270, fontsize=12, labelpad=18)
+    axes[0].set_xlim(float(np.min(corners_x)), float(np.max(corners_x)))
+    axes[0].set_ylim(float(np.min(corners_y)), float(np.max(corners_y)))
+    axes[0].set_xticks(centers_x)
+    axes[0].set_yticks(centers_y)
+    axes[0].tick_params(width=0)
+    axes[0].tick_params(axis="x", labelrotation=90)
+    axes[0].set_ylabel("pixel row number", fontsize=12)
+    axes[0].set_xlabel("pixel column number", fontsize=12)
+    axes[0].set_title(
+        "Pixel field" if sector is None else f"Sector {sector} pixel field",
+        fontsize=13,
+    )
+
+    im = axes[1].imshow(
+        img,
+        extent=[-0.5, n_cols - 0.5, n_rows - 0.5, -0.5],
+    )
+    _draw_aperture_outline(axes[1], aperture, color="red")
+    axes[1].set_xlim(-0.5, n_cols - 0.5)
+    axes[1].set_ylim(n_rows - 0.5, -0.5)
+    axes[1].set_xticks(centers_x)
+    axes[1].set_yticks(centers_y)
+    axes[1].tick_params(width=0)
+    axes[1].tick_params(axis="x", labelrotation=90)
+    axes[1].set_ylabel("pixel row number", fontsize=12)
+    axes[1].set_xlabel("pixel column number", fontsize=12)
+    axes[1].set_title(
+        "Cutout" if sector is None else f"Sector {sector} cutout",
+        fontsize=13,
+    )
+    cb2 = fig.colorbar(im, ax=axes[1], pad=0.02)
+    cb2.ax.set_ylabel("flux", rotation=270, fontsize=12, labelpad=18)
+
+    plt.tight_layout()
+    if save:
+        if fname is None:
+            suffix = "" if sector is None else f"_sector{sector}"
+            fname = f"TIC{stellar_field.target.tic_id}{suffix}"
+        plt.savefig(f"{fname}.pdf")
+    else:
+        plt.show()
+    plt.close(fig)
+
+
+def _draw_aperture_outline(ax, aperture_pixels: np.ndarray, *, color: str) -> None:
+    for col, row in aperture_pixels:
+        ax.plot([col - 0.5, col + 0.5], [row - 0.5, row - 0.5], color=color, zorder=2)
+        ax.plot([col - 0.5, col + 0.5], [row + 0.5, row + 0.5], color=color, zorder=2)
+        ax.plot([col - 0.5, col - 0.5], [row - 0.5, row + 0.5], color=color, zorder=2)
+        ax.plot([col + 0.5, col + 0.5], [row - 0.5, row + 0.5], color=color, zorder=2)
