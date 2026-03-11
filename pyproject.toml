@@ -19,6 +19,7 @@ dependencies = [
     "lightkurve>=2.4",
     "matplotlib>=3.7",
     "pandas>=2.0",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.scripts]

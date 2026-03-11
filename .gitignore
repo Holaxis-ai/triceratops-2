@@ -12,3 +12,6 @@ working_docs/
 .env
 .env.*
 !.env.example
+.auto-fpp.toml
+.auto-fpp.*.toml
+!.auto-fpp.example.toml
