@@ -117,7 +117,7 @@ class Config:
         mission: Default mission when not overridden by MissionConfig.
     """
 
-    n_mc_samples: int = 20_000
+    n_mc_samples: int = 1_000_000
     n_best_samples: int = 1000
     parallel: bool = True
     flat_priors: bool = False
