@@ -143,12 +143,11 @@ recorded in the golden files.
 
 ---
 
-## NC-03 — lnprior_background: np.log10 → np.log (PENDING)
+## NC-03 — lnprior_background: np.log10 → np.log
 
-**Commit:** (pending)
-**Date:** (pending)
-**Status:** Pending — not yet applied.  Tracked here so the rationale is
-written before the code change, not after.
+**Commit:** `931230f2`
+**Date:** 2026-03-09
+**Status:** Applied
 **Affects FPP:** Yes (decreases — background false-positive scenarios gain
 probability mass)
 **Affects NFPP:** No (nearby-star scenarios are unaffected)
@@ -195,12 +194,12 @@ For TESS-typical separations (~2–10 arcsec) the prior difference is
 `log(s²) × (1 - 1/log10) ≈ 1.3–3.0` log-units per sample, accumulating
 over 1M draws to a systematic lnZ bias of hundreds of units.
 
-### Expected FPP shift
+### FPP shift
 
-FPP will **decrease** further after this fix (background scenarios gain
-additional probability mass beyond the NC-01 shift).  The exact magnitude
-depends on the target's neighbour density.  Golden files will be updated
-at the commit that applies this fix.
+FPP **decreases** after this fix (background scenarios gain additional
+probability mass beyond the NC-01 shift).  The exact magnitude depends on
+the target's neighbour density.  Golden files were updated at the same
+commit that applied this fix.
 
 ### Call sites
 
