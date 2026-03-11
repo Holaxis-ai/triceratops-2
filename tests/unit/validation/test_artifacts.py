@@ -14,7 +14,7 @@ from auto_fpp.artifacts import (
 )
 from auto_fpp.outputs import with_compute_outputs, with_preparation_outputs
 from triceratops.domain.entities import LightCurve, Star, StellarField
-from triceratops.domain.result import ValidationResult
+from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.domain.value_objects import StellarParameters
 from triceratops.lightcurve.config import LightCurveConfig
@@ -102,6 +102,31 @@ def _trilegal() -> TRILEGALResult:
         rmags=data + 5.0,
         imags=data + 6.0,
         zmags=data + 7.0,
+    )
+
+
+def _scenario_result() -> ScenarioResult:
+    n = 4
+    return ScenarioResult(
+        scenario_id=ScenarioID.TP,
+        host_star_tic_id=12345,
+        ln_evidence=-5.0,
+        host_mass_msun=np.ones(n),
+        host_radius_rsun=np.ones(n),
+        host_u1=np.full(n, 0.3),
+        host_u2=np.full(n, 0.2),
+        period_days=np.full(n, 5.0),
+        inclination_deg=np.full(n, 88.0),
+        impact_parameter=np.full(n, 0.1),
+        eccentricity=np.zeros(n),
+        arg_periastron_deg=np.full(n, 90.0),
+        planet_radius_rearth=np.full(n, 2.0),
+        eb_mass_msun=np.zeros(n),
+        eb_radius_rsun=np.zeros(n),
+        flux_ratio_eb_tess=np.zeros(n),
+        companion_mass_msun=np.zeros(n),
+        companion_radius_rsun=np.zeros(n),
+        flux_ratio_companion_tess=np.zeros(n),
     )
 
 
@@ -289,13 +314,20 @@ def test_compute_outputs_are_added_and_round_trip() -> None:
             target_id=12345,
             false_positive_probability=0.1,
             nearby_false_positive_probability=0.02,
-            scenario_results=[],
+            scenario_results=[_scenario_result()],
         ),
         workspace=None,  # type: ignore[arg-type]
     )
 
+    assert "tables/probs.csv" in updated.extra_files
     assert "tables/scenario_probabilities.csv" in updated.extra_files
     assert "plots/fits.pdf" in updated.extra_files
+    probs_text = updated.extra_files["tables/probs.csv"].decode("utf-8")
+    assert "ID" in probs_text
+    assert "scenario" in probs_text
+    assert "lnZ" in probs_text
+    assert "flux_ratio_comp_T" in probs_text
     loaded = PreparedAutoFppArtifact.from_bundle(updated.to_bundle())
+    assert "tables/probs.csv" in loaded.extra_files
     assert "tables/scenario_probabilities.csv" in loaded.extra_files
     assert "plots/fits.pdf" in loaded.extra_files
