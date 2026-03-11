@@ -13,6 +13,7 @@ from time import sleep
 
 import pandas as pd
 from mechanicalsoup import StatefulBrowser
+from pandas.errors import EmptyDataError
 
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.population.trilegal_parser import parse_trilegal_csv
@@ -102,7 +103,11 @@ def _poll_until_complete(
     """
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        last = pd.read_csv(url, header=None).iloc[-1:]
+        try:
+            last = pd.read_csv(url, header=None).iloc[-1:]
+        except EmptyDataError:
+            time.sleep(interval_s)
+            continue
         if last.values[0, 0] == "#TRILEGAL normally terminated":
             return
         time.sleep(interval_s)
@@ -122,7 +127,11 @@ def _download_and_save(
 
     Ports funcs.save_trilegal() (funcs.py:354-380).
     """
-    _poll_until_complete(output_url, timeout_s=poll_timeout_seconds, interval_s=poll_interval_seconds)
+    _poll_until_complete(
+        output_url,
+        timeout_s=poll_timeout_seconds,
+        interval_s=poll_interval_seconds,
+    )
 
     df = pd.read_csv(output_url, sep=r"\s+")
     df.to_csv(cache_path, index=False)
