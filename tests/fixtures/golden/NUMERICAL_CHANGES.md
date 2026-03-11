@@ -37,7 +37,7 @@ The original TRICERATOPS+ code computes the marginal log-likelihood (log
 evidence) as:
 
 ```python
-Z     = mean(exp(lnL + lnz_const))   # lnz_const = 650
+Z     = mean(exp(lnL + const))
 lnZ   = log(Z)
 ```
 
@@ -68,9 +68,10 @@ always in `(0, 1]` and never underflows.  The result is mathematically
 identical to the original formula but numerically stable for any lnL
 magnitude.
 
-The `lnz_const` offset is preserved in the returned value for backward
-compatibility with callers that inspect raw lnZ numbers (it cancels in all
-relative-probability comparisons).
+The initial rewrite preserved a legacy additive offset in returned `lnZ`
+values for compatibility. That offset was later removed once the stable
+log-sum-exp implementation was adopted everywhere and no caller needed the
+old shifted scale.
 
 ### Observed FPP shift (TOI-4051, n=10 000, seed=42)
 

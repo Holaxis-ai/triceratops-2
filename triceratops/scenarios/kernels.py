@@ -38,24 +38,17 @@ def resolve_period(
 
 def compute_lnZ(
     lnL: np.ndarray,
-    lnz_const: float,
 ) -> float:
     """Compute the log marginal likelihood (evidence) from a lnL array.
 
     Uses the log-sum-exp trick for numerical stability, which is correct
-    regardless of the number of data points (unlike a fixed lnz_const offset
-    which fails when sum(lnL) << -lnz_const, e.g. for large LC point counts).
+    regardless of the number of data points.
 
     lnZ = log(mean(exp(lnL)))
         = lnL_max + log(sum(exp(lnL_finite - lnL_max)) / N)
 
-    The lnz_const offset is added to the result for backward compatibility
-    with callers that inspect raw lnZ values; it cancels in all relative-
-    probability comparisons.
-
     Args:
         lnL: Array of per-sample log-likelihoods, shape (N,). May contain -inf.
-        lnz_const: Constant added to the returned lnZ for legacy compatibility.
 
     Returns:
         lnZ: float. Will be -inf if all lnL values are -inf.
@@ -67,7 +60,7 @@ def compute_lnZ(
     lnL_max = float(np.max(lnL_finite))
     sum_exp = float(np.sum(np.exp(lnL_finite - lnL_max)))
     N = len(lnL)
-    return lnL_max + float(np.log(sum_exp / N)) + lnz_const
+    return lnL_max + float(np.log(sum_exp / N))
 
 
 def pack_best_indices(

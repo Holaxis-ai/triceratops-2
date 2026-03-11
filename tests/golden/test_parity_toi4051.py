@@ -24,6 +24,7 @@ from tests.conftest import GOLDEN_DIR
 # Tolerance constants (from BRIEFING.md)
 LNZ_RTOL = 0.01  # 1% relative tolerance on lnZ
 FPP_ATOL = 1e-4  # absolute tolerance on FPP and NFPP
+LEGACY_LNZ_OFFSET = 650.0
 
 # TOI-4051 parameters (from example notebook)
 TIC_ID = 237101326
@@ -32,7 +33,6 @@ P_ORB = 1.5373948
 TRANSIT_DEPTH = 2677e-6
 SEED = 42
 N_MC = 10_000
-LNZ_CONST = 650.0
 
 LC_PATH = Path(__file__).parent.parent / "fixtures" / "light_curves" / "toi4051_lc.npy"
 GOLDEN_PATH = GOLDEN_DIR / "toi4051.json"
@@ -112,7 +112,6 @@ def _run_new_code(golden: dict):
 
         ws.config = Config(
             n_mc_samples=n,
-            lnz_const=LNZ_CONST,
             parallel=False,
             mission="TESS",
         )
@@ -188,7 +187,7 @@ def test_lnZ_within_rtol(
         pytest.skip(f"Scenario {scenario_id} not in new result")
 
     new_lnZ = float(new_row["lnZ"].iloc[0])
-    golden_lnZ = golden_toi4051[scenario_id]["lnZ"]
+    golden_lnZ = golden_toi4051[scenario_id]["lnZ"] - LEGACY_LNZ_OFFSET
 
     if not np.isfinite(golden_lnZ) and not np.isfinite(new_lnZ):
         return  # both -inf: pass

@@ -169,7 +169,7 @@ class TestPTPConsistency:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array, lnz_const):
+        def capture_lnZ(score_array):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -222,7 +222,7 @@ class TestPTPDivergence:
         pack_args: list[np.ndarray] = []
         lnL_raw: list[np.ndarray] = []
 
-        def capture_lnZ(score_array, lnz_const):
+        def capture_lnZ(score_array):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -295,7 +295,7 @@ class TestPEBTwinBranch:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array, lnz_const):
+        def capture_lnZ(score_array):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -348,7 +348,7 @@ class TestSEBTwinBranch:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array, lnz_const):
+        def capture_lnZ(score_array):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -400,7 +400,7 @@ class TestFlatPriorEdgeCase:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array, lnz_const):
+        def capture_lnZ(score_array):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -465,7 +465,7 @@ class TestSTPConsistency:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array, lnz_const):
+        def capture_lnZ(score_array):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 

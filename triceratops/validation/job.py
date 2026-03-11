@@ -59,7 +59,7 @@ class PreparedValidationInputs:
     light_curve:
         Phase-folded, normalised photometric time series.
     config:
-        Runtime configuration (n_mc_samples, lnz_const, …).
+        Runtime configuration (n_mc_samples, n_best_samples, …).
     period_days:
         Orbital period in days.  May be a scalar or [min, max] range.
     trilegal_population:

@@ -329,28 +329,6 @@ class TestNTPEvolvedCompute:
         assert isinstance(result, ScenarioResult)
         assert result.ln_evidence > -np.inf
 
-
-class TestBug03Fix:
-    @patch(f"{_LNL_MOD}.lnL_planet_p", side_effect=_mock_lnL_planet_p)
-    def test_ntp_evolved_uses_config_lnz_const(
-        self, _mock, transit_lc, stellar_params,
-    ) -> None:
-        """BUG-03: verify lnZ changes when config.lnz_const is changed."""
-        s = NTPEvolvedScenario(FixedLDCCatalog())
-        cfg_650 = Config(n_mc_samples=200, n_best_samples=10, lnz_const=650)
-        cfg_700 = Config(n_mc_samples=200, n_best_samples=10, lnz_const=700)
-
-        np.random.seed(42)
-        result_650 = s.compute(transit_lc, stellar_params, 5.0, cfg_650)
-        np.random.seed(42)
-        result_700 = s.compute(transit_lc, stellar_params, 5.0, cfg_700)
-
-        assert isinstance(result_650, ScenarioResult)
-        assert isinstance(result_700, ScenarioResult)
-        # Different lnz_const should produce different lnZ
-        assert result_650.ln_evidence != result_700.ln_evidence
-
-
 # ---------------------------------------------------------------------------
 # NEBEvolved Tests
 # ---------------------------------------------------------------------------

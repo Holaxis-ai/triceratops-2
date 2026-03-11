@@ -377,7 +377,7 @@ class PTPScenario(BaseScenario):
         )
 
         # Add companion prior before computing Z (source: line 883)
-        lnZ = compute_lnZ(lnL + lnprior_comp, config.lnz_const)
+        lnZ = compute_lnZ(lnL + lnprior_comp)
 
         n_best = config.n_best_samples
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
@@ -809,8 +809,8 @@ class PEBScenario(BaseScenario):
         )
 
         # Add companion prior before computing Z (source: lines 1223-1228)
-        lnZ = compute_lnZ(lnL + lnprior_comp, config.lnz_const)
-        lnZ_twin = compute_lnZ(lnL_twin + lnprior_comp, config.lnz_const)
+        lnZ = compute_lnZ(lnL + lnprior_comp)
+        lnZ_twin = compute_lnZ(lnL_twin + lnprior_comp)
 
         n_best = config.n_best_samples
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
@@ -1178,7 +1178,7 @@ class STPScenario(BaseScenario):
             resolved_ext_lcs, config,
         )
 
-        lnZ = compute_lnZ(lnL + lnprior_comp, config.lnz_const)
+        lnZ = compute_lnZ(lnL + lnprior_comp)
 
         n_best = config.n_best_samples
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood
@@ -1607,8 +1607,8 @@ class SEBScenario(BaseScenario):
             resolved_ext_lcs, config,
         )
 
-        lnZ = compute_lnZ(lnL + lnprior_comp, config.lnz_const)
-        lnZ_twin = compute_lnZ(lnL_twin + lnprior_comp, config.lnz_const)
+        lnZ = compute_lnZ(lnL + lnprior_comp)
+        lnZ_twin = compute_lnZ(lnL_twin + lnprior_comp)
 
         n_best = config.n_best_samples
         # BUG-07 fix: rank by posterior (lnL + lnprior_comp), not raw likelihood

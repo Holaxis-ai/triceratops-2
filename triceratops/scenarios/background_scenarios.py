@@ -291,7 +291,7 @@ class DTPScenario(BaseScenario):
             lnL = lnL + ext_lnL
 
         # Fold in the background prior so compute_lnZ gives correct evidence
-        # Original: Z = mean(exp(lnL + lnprior_companion + lnz_const))
+        # Original code used a fixed additive offset before exponentiation.
         lnL = lnL + lnprior
 
         return lnL, None

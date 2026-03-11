@@ -95,27 +95,23 @@ class TestResolvePeriod:
 class TestComputeLnZ:
     def test_all_neg_inf(self) -> None:
         lnL = np.full(100, -np.inf)
-        assert compute_lnZ(lnL, 650.0) == -np.inf
+        assert compute_lnZ(lnL) == -np.inf
 
     def test_all_zero_lnL(self) -> None:
         lnL = np.zeros(100)
-        result = compute_lnZ(lnL, 650.0)
-        # Z = mean(exp(0 + 650)) = exp(650), lnZ = 650
-        assert result == pytest.approx(650.0, rel=1e-10)
+        result = compute_lnZ(lnL)
+        assert result == pytest.approx(0.0, rel=1e-10)
 
     def test_known_value(self) -> None:
-        # If lnL = [-650] for all N, then exp(lnL + 650) = exp(0) = 1
-        # Z = mean(1) = 1, lnZ = log(1) = 0
         lnL = np.full(50, -650.0)
-        result = compute_lnZ(lnL, 650.0)
-        assert result == pytest.approx(0.0, abs=1e-10)
+        result = compute_lnZ(lnL)
+        assert result == pytest.approx(-650.0, abs=1e-10)
 
     def test_single_good_sample_among_neg_inf(self) -> None:
         lnL = np.full(100, -np.inf)
-        lnL[42] = -650.0  # one good sample
-        result = compute_lnZ(lnL, 650.0)
-        # Z = mean of [0, ..., 1, ..., 0] = 1/100
-        expected = np.log(1.0 / 100.0)
+        lnL[42] = -650.0
+        result = compute_lnZ(lnL)
+        expected = -650.0 + np.log(1.0 / 100.0)
         assert result == pytest.approx(expected, rel=1e-6)
 
     # --- Numerical stability tests ---
@@ -123,19 +119,9 @@ class TestComputeLnZ:
     def test_large_positive_lnL_no_overflow(self) -> None:
         """Large positive lnL values must not overflow; result should be finite."""
         lnL = np.full(100, 5000.0)
-        lnz_const = 0.0
-        result = compute_lnZ(lnL, lnz_const)
+        result = compute_lnZ(lnL)
         assert np.isfinite(result), "compute_lnZ overflowed for large positive lnL"
-        # lnL_max=5000, log(sum_exp/N)=log(1)=0; result = 5000 + lnz_const
-        assert result == pytest.approx(5000.0 + lnz_const, rel=1e-10)
-
-    def test_large_positive_lnL_with_lnz_const(self) -> None:
-        """Large positive lnL + nonzero lnz_const: result ≈ lnL_max + lnz_const."""
-        lnL = np.full(50, 5000.0)
-        lnz_const = 650.0
-        result = compute_lnZ(lnL, lnz_const)
-        assert np.isfinite(result)
-        assert result == pytest.approx(5000.0 + lnz_const, rel=1e-10)
+        assert result == pytest.approx(5000.0, rel=1e-10)
 
     def test_extreme_spread_underflows_gracefully(self) -> None:
         """Values far below max underflow to 0; result is still finite."""
@@ -143,7 +129,7 @@ class TestComputeLnZ:
         lnL_max = 0.0
         lnL = np.full(N, lnL_max - 800.0)
         lnL[0] = lnL_max  # single value at max
-        result = compute_lnZ(lnL, 0.0)
+        result = compute_lnZ(lnL)
         assert np.isfinite(result), "result is not finite for extreme spread"
         # Only index 0 contributes; exp(-800) underflows to 0 for others.
         # result = lnL_max + log(1/N) = log(1/N)
@@ -151,47 +137,41 @@ class TestComputeLnZ:
         assert result == pytest.approx(expected, rel=1e-6)
 
     def test_identical_values_equal_that_value(self) -> None:
-        """All lnL identical: log-sum-exp gives exactly that value (+ lnz_const)."""
+        """All lnL identical: log-sum-exp gives exactly that value."""
         lnL = np.full(300, -300.0)
-        lnz_const = 10.0
-        result = compute_lnZ(lnL, lnz_const)
+        result = compute_lnZ(lnL)
         assert np.isfinite(result)
-        # lnL_max=-300, log(sum_exp/N)=log(N/N)=0; result=-300+lnz_const
-        assert result == pytest.approx(-300.0 + lnz_const, rel=1e-10)
+        assert result == pytest.approx(-300.0, rel=1e-10)
 
     def test_single_finite_among_many_neg_inf(self) -> None:
-        """One finite value X among N-1 -inf entries: result ≈ X + lnz_const - log(N)."""
+        """One finite value X among N-1 -inf entries: result ≈ X - log(N)."""
         N = 500
         X = -123.0
-        lnz_const = 50.0
         lnL = np.full(N, -np.inf)
         lnL[7] = X
-        result = compute_lnZ(lnL, lnz_const)
+        result = compute_lnZ(lnL)
         assert np.isfinite(result)
-        expected = X + lnz_const + np.log(1.0 / N)
+        expected = X + np.log(1.0 / N)
         assert result == pytest.approx(expected, rel=1e-8)
 
     def test_large_N_all_zeros(self) -> None:
-        """N=1_000_000 draws all at 0.0: result ≈ lnz_const."""
+        """N=1_000_000 draws all at 0.0: result is 0.0."""
         N = 1_000_000
         lnL = np.zeros(N)
-        lnz_const = 42.0
-        result = compute_lnZ(lnL, lnz_const)
+        result = compute_lnZ(lnL)
         assert np.isfinite(result)
-        # lnL_max=0, log(N/N)=0; result=0+lnz_const
-        assert result == pytest.approx(lnz_const, rel=1e-10)
+        assert result == pytest.approx(0.0, rel=1e-10)
 
     def test_mixed_extreme_range_correct_result(self) -> None:
         """Mixed lnL from -10000 to +100: max-anchored computation is correct."""
         N = 1000
         rng = np.random.default_rng(42)
         lnL = rng.uniform(-10000.0, 100.0, size=N)
-        lnz_const = 0.0
-        result = compute_lnZ(lnL, lnz_const)
+        result = compute_lnZ(lnL)
         assert np.isfinite(result), "mixed extreme range produced non-finite result"
         # Reference: only values near the max contribute; the max itself is ~100
         lnL_max = np.max(lnL)
-        assert result <= lnL_max + lnz_const
+        assert result <= lnL_max
         assert result > -np.inf
 
 

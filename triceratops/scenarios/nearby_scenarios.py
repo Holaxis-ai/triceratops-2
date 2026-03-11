@@ -6,8 +6,8 @@ TRILEGAL peers with Tmag +/- 1. Per-star LDC via get_coefficients_bulk().
 NTP_evolved / NEB_evolved: target is a known subgiant (logg=3.0).
 Mass derived from logg and R_s.
 
-BUG-03 fix: all four use config.lnz_const (default 650) via BaseScenario,
-not the hardcoded 600 in the original.
+BUG-03 fix: all four use the shared numerically stable compute_lnZ path via
+BaseScenario instead of the old hardcoded underflow-prone evidence formula.
 
 BUG-05 fix: NEB_evolved passes radii[mask] (array) to lnL_EB_twin_p,
 not scalar R_s.
@@ -113,7 +113,7 @@ class NTPUnknownScenario(BaseScenario):
     Extra mask: logg >= 3.5 and Teff <= 10000 (main-sequence filter).
     No external light curve support.
 
-    BUG-03 fix: uses config.lnz_const via BaseScenario (not hardcoded 600).
+    BUG-03 fix: uses the shared compute_lnZ path via BaseScenario.
 
     Source: marginal_likelihoods.py:3672-3861
     """
@@ -401,7 +401,7 @@ class NEBUnknownScenario(BaseScenario):
 
     Returns (result, result_twin).
 
-    BUG-03 fix: uses config.lnz_const via BaseScenario.
+    BUG-03 fix: uses the shared compute_lnZ path via BaseScenario.
 
     Source: marginal_likelihoods.py:3864-4145
     """
@@ -598,7 +598,7 @@ class NTPEvolvedScenario(BaseScenario):
     logg fixed at 3.0. Mass derived from logg and R_s.
     No external light curve support.
 
-    BUG-03 fix: uses config.lnz_const via BaseScenario.
+    BUG-03 fix: uses the shared compute_lnZ path via BaseScenario.
     BUG-05 fix: R_s stored as np.full(n, R_s) array, not scalar.
 
     Source: marginal_likelihoods.py:4148-4285
@@ -755,7 +755,7 @@ class NEBEvolvedScenario(BaseScenario):
 
     Returns (result, result_twin).
 
-    BUG-03 fix: uses config.lnz_const via BaseScenario.
+    BUG-03 fix: uses the shared compute_lnZ path via BaseScenario.
     BUG-05 fix: radii passed to lnL_EB_twin_p are arrays, not scalar R_s.
 
     Source: marginal_likelihoods.py:4288-4503

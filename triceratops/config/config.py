@@ -108,10 +108,6 @@ class Config:
 
     Attributes:
         n_mc_samples: Number of Monte Carlo draws per scenario (was ``N`` in original).
-        lnz_const: Log-normalisation constant added before taking exp() to avoid
-            underflow when computing Z = mean(exp(lnL + lnz_const)).
-            Original default: 650. N-scenario functions hardcoded 600 (BUG-03);
-            in the rewrite ALL scenarios use this single parameter.
         n_best_samples: Number of top-likelihood draws to retain for best-fit
             parameter reporting (was ``N_samples = 1000`` in the accumulation block).
         parallel: If True, use vectorized (masked array) likelihood evaluation.
@@ -122,7 +118,6 @@ class Config:
     """
 
     n_mc_samples: int = 20_000
-    lnz_const: float = 650.0
     n_best_samples: int = 1000
     parallel: bool = True
     flat_priors: bool = False

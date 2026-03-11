@@ -138,9 +138,9 @@ class BaseScenario(ABC):
         )
 
         # Phase 8: Compute marginal likelihoods
-        lnZ = compute_lnZ(lnL, config.lnz_const)
+        lnZ = compute_lnZ(lnL)
         lnZ_twin = (
-            compute_lnZ(lnL_twin, config.lnz_const)
+            compute_lnZ(lnL_twin)
             if (lnL_twin is not None and self.returns_twin)
             else None
         )
