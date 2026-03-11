@@ -21,6 +21,10 @@ from triceratops.validation.runner import (
     run_tess_fpp,
 )
 from triceratops.validation.artifacts import PreparedAutoFppArtifact
+from triceratops.validation.store import (
+    FilesystemPreparedArtifactStore,
+    StoredArtifactRef,
+)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -33,13 +37,19 @@ def main(argv: Sequence[str] | None = None) -> None:
             config=_build_prepare_config(args),
             ephemeris=_build_ephemeris(args),
         )
-        out_dir = Path(args.output) if args.output else _default_artifact_dir(artifact)
-        artifact.to_directory(out_dir)
+        store = FilesystemPreparedArtifactStore(
+            base_dir=_prepare_store_base_dir(args.output)
+        )
+        ref = store.put(
+            artifact,
+            key=_prepare_store_key(args.output, artifact),
+        )
         if args.json:
             print(
                 json.dumps(
                     {
-                        "artifact_dir": str(out_dir),
+                        "artifact_dir": ref.location,
+                        "artifact_key": ref.key,
                         "artifact_kind": artifact.artifact_kind,
                         "tic_id": artifact.resolved_target.tic_id,
                         "target_ref": artifact.resolved_target.target_ref,
@@ -49,7 +59,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 )
             )
             return
-        print(f"artifact_dir: {out_dir}")
+        print(f"artifact_dir: {ref.location}")
         print(f"target: TIC {artifact.resolved_target.tic_id}")
         print(f"artifact_kind: {artifact.artifact_kind}")
         return
@@ -57,7 +67,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args_in and args_in[0] == "compute":
         parser = _build_compute_parser()
         args = parser.parse_args(args_in[1:])
-        artifact = PreparedAutoFppArtifact.from_directory(args.artifact_dir)
+        store = FilesystemPreparedArtifactStore()
+        artifact = store.get(
+            StoredArtifactRef(
+                key=Path(args.artifact_dir).name,
+                location=args.artifact_dir,
+            )
+        )
         result = compute_auto_fpp(
             artifact,
             config=AutoFppComputeConfig(
@@ -311,6 +327,25 @@ def _build_prepare_config(args: argparse.Namespace) -> AutoFppPrepareConfig:
 def _default_artifact_dir(artifact: PreparedAutoFppArtifact) -> Path:
     slug = str(artifact.created_at_utc).replace(":", "-")
     return Path(f"auto-fpp-tic{artifact.resolved_target.tic_id}-{slug}")
+
+
+def _prepare_store_base_dir(output: str | None) -> Path:
+    if output is None:
+        return Path(".")
+    output_path = Path(output)
+    if output_path.suffix:
+        return output_path.parent
+    return output_path.parent if output_path.name == "" else output_path.parent
+
+
+def _prepare_store_key(
+    output: str | None,
+    artifact: PreparedAutoFppArtifact,
+) -> str | None:
+    if output is None:
+        return _default_artifact_dir(artifact).name
+    output_path = Path(output)
+    return output_path.name
 
 
 def _result_to_dict(result) -> dict[str, object]:

@@ -5,6 +5,11 @@ from triceratops.validation.artifacts import (
     ArtifactCapabilities,
     PreparedAutoFppArtifact,
 )
+from triceratops.validation.store import (
+    FilesystemPreparedArtifactStore,
+    PreparedArtifactStore,
+    StoredArtifactRef,
+)
 from triceratops.validation.runner import (
     ApertureConfig,
     AutoFppComputeConfig,
@@ -23,6 +28,9 @@ __all__ = [
     "PreparedAutoFppArtifact",
     "ArtifactCapabilities",
     "ApertureProvenance",
+    "PreparedArtifactStore",
+    "FilesystemPreparedArtifactStore",
+    "StoredArtifactRef",
     "ApertureConfig",
     "AutoFppPrepareConfig",
     "AutoFppComputeConfig",
