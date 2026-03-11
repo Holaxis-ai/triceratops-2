@@ -80,6 +80,9 @@ class StubWorkspace:
     def fetch_catalog(self) -> StellarField:
         return self.field
 
+    def set_resolved_target(self, target) -> None:
+        self._resolved_target = target
+
     def calc_depths(
         self,
         transit_depth: float,

@@ -45,6 +45,99 @@ def _quality_bitmask(quality_mask: str) -> str:
     return {"none": "none", "default": "default", "hard": "hard"}[quality_mask]
 
 
+def process_lightcurve_collection(
+    lc_coll: Any,
+    config: LightCurveConfig,
+    *,
+    tic_id: int,
+) -> Any:
+    """Apply the standard lightkurve preprocessing pipeline to a collection."""
+    lc = lc_coll.stitch()
+    lc = lc.remove_nans()
+
+    if len(lc.time) == 0:
+        raise LightCurveNotFoundError(
+            f"TIC {tic_id}: all cadences removed after stitch/NaN removal"
+        )
+
+    if config.sigma_clip is not None:
+        lc = lc.remove_outliers(
+            sigma_upper=config.sigma_clip,
+            sigma_lower=float("inf"),
+        )
+
+    if config.detrend_method == "flatten":
+        lc = lc.flatten(
+            window_length=config.flatten_window_length,
+            polyorder=config.flatten_polyorder,
+        )
+
+    return lc
+
+
+def fold_lightcurve(
+    lc: Any,
+    ephemeris: Ephemeris,
+) -> Any:
+    """Fold a light curve on the supplied ephemeris."""
+    import astropy.time
+
+    epoch = astropy.time.Time(ephemeris.t0_btjd, format="btjd", scale="tdb")
+    return lc.fold(period=ephemeris.period_days, epoch_time=epoch)
+
+
+def trim_folded_lightcurve(
+    lc_folded: Any,
+    ephemeris: Ephemeris,
+    config: LightCurveConfig,
+    *,
+    tic_id: int,
+) -> Any:
+    """Trim a folded light curve to the configured transit window."""
+    if ephemeris.duration_hours is not None:
+        half_window = config.phase_window_factor * ephemeris.duration_hours / 24.0
+    else:
+        half_window = ephemeris.period_days * 0.25
+    lc_trimmed = lc_folded[np.abs(lc_folded.phase.value) < half_window]
+
+    if len(lc_trimmed) == 0:
+        raise LightCurveEmptyError(
+            f"TIC {tic_id}: no cadences in transit window after fold and trim"
+        )
+    return lc_trimmed
+
+
+def fold_and_trim_lightcurve(
+    lc: Any,
+    ephemeris: Ephemeris,
+    config: LightCurveConfig,
+    *,
+    tic_id: int,
+) -> Any:
+    """Fold a light curve on the supplied ephemeris and trim to the transit window."""
+    lc_folded = fold_lightcurve(lc, ephemeris)
+    return trim_folded_lightcurve(lc_folded, ephemeris, config, tic_id=tic_id)
+
+
+def resolve_cadence_label(stitched: Any, config_cadence: str) -> str:
+    """Resolve the cadence label used for downstream exposure-time selection."""
+    if config_cadence != "auto":
+        return config_cadence
+    exptime = stitched.meta.get("TIMEDEL", stitched.meta.get("EXPTIME"))
+    if exptime is not None:
+        exptime_sec = float(exptime)
+        if exptime_sec < 1.0:
+            exptime_sec *= 86400.0
+        if exptime_sec < 60:
+            return "20sec"
+        if exptime_sec < 300:
+            return "2min"
+        if exptime_sec < 900:
+            return "10min"
+        return "30min"
+    return "2min"
+
+
 class LightkurveSource:
     """Acquire and prepare a TESS light curve from MAST using lightkurve.
 
@@ -89,7 +182,6 @@ class LightkurveSource:
         lightkurve-native transforms, such as optional binning, before
         converting into the domain LightCurve type.
         """
-        import astropy.time
         import lightkurve as lk
 
         config = config or LightCurveConfig()
@@ -108,48 +200,12 @@ class LightkurveSource:
         else:
             lc_coll = self._search_and_download(config, lk)
 
-        # Step 2: Stitch (normalises each sector by median — do NOT normalize() again)
-        lc = lc_coll.stitch()
-        lc = lc.remove_nans()
-
-        if len(lc.time) == 0:
-            raise LightCurveNotFoundError(
-                f"TIC {self.tic_id}: all cadences removed after stitch/NaN removal"
-            )
-
-        # Step 3: Upper-only sigma clip (preserves transit dips)
-        if config.sigma_clip is not None:
-            lc = lc.remove_outliers(
-                sigma_upper=config.sigma_clip,
-                sigma_lower=float("inf"),
-            )
-
-        # Step 4: Optional detrending
-        if config.detrend_method == "flatten":
-            lc = lc.flatten(
-                window_length=config.flatten_window_length,
-                polyorder=config.flatten_polyorder,
-            )
-
-        # Step 5: Phase fold
-        epoch = astropy.time.Time(ephemeris.t0_btjd, format="btjd", scale="tdb")
-        lc_folded = lc.fold(period=ephemeris.period_days, epoch_time=epoch)
-
-        # Step 6: Trim to transit window
-        if ephemeris.duration_hours is not None:
-            half_window = config.phase_window_factor * ephemeris.duration_hours / 24.0
-        else:
-            half_window = ephemeris.period_days * 0.25
-        lc_trimmed = lc_folded[np.abs(lc_folded.phase.value) < half_window]
-
-        if len(lc_trimmed) == 0:
-            raise LightCurveEmptyError(
-                f"TIC {self.tic_id}: no cadences in transit window after fold and trim"
-            )
+        lc = process_lightcurve_collection(lc_coll, config, tic_id=self.tic_id)
+        lc_trimmed = fold_and_trim_lightcurve(lc, ephemeris, config, tic_id=self.tic_id)
 
         # Step 7: Convert to domain type
         sectors = self._extract_sectors(lc_coll, lc)
-        cadence_used = self._resolve_cadence(lc, config.cadence)
+        cadence_used = resolve_cadence_label(lc, config.cadence)
         return lc_trimmed, sectors, cadence_used
 
     def _search_and_download(self, config: LightCurveConfig, lk: Any) -> Any:
@@ -227,21 +283,3 @@ class LightkurveSource:
                 return tuple(sorted(int(s) for s in meta_sectors))
             return (int(meta_sectors),)
         return (0,)
-
-    @staticmethod
-    def _resolve_cadence(stitched: Any, config_cadence: str) -> str:
-        if config_cadence != "auto":
-            return config_cadence
-        exptime = stitched.meta.get("TIMEDEL", stitched.meta.get("EXPTIME"))
-        if exptime is not None:
-            exptime_sec = float(exptime)
-            if exptime_sec < 1.0:
-                exptime_sec *= 86400.0
-            if exptime_sec < 60:
-                return "20sec"
-            if exptime_sec < 300:
-                return "2min"
-            if exptime_sec < 900:
-                return "10min"
-            return "30min"
-        return "2min"

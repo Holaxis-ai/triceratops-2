@@ -17,7 +17,6 @@ from triceratops.lightcurve.convert import convert_folded_to_domain
 from triceratops.lightcurve.ephemeris import Ephemeris, ResolvedTarget
 from triceratops.lightcurve.errors import (
     EphemerisRequiredError,
-    LightCurveEmptyError,
     LightCurveError,
     LightCurveNotFoundError,
 )
@@ -27,7 +26,12 @@ from triceratops.lightcurve.exofop.toi_resolution import (
     resolve_toi_to_tic_ephemeris_depth,
 )
 from triceratops.lightcurve.result import LightCurvePreparationResult
-from triceratops.lightcurve.sources.lightkurve import LightkurveSource
+from triceratops.lightcurve.sources.lightkurve import (
+    fold_lightcurve,
+    process_lightcurve_collection,
+    resolve_cadence_label,
+    trim_folded_lightcurve,
+)
 from triceratops.validation.workspace import ValidationWorkspace
 
 if TYPE_CHECKING:
@@ -142,7 +146,7 @@ def run_tess_fpp(
         config=cfg.compute,
         trilegal_cache_path=cfg.trilegal_cache_path,
     )
-    workspace._resolved_target = resolved_target
+    workspace.set_resolved_target(resolved_target)
     field = workspace.fetch_catalog()
     pixel_coords_per_sector, aperture_pixels_per_sector = _derive_sector_geometry(
         prepared_lc.tpfs,
@@ -245,7 +249,6 @@ def _prepare_tpf_lightcurve(
     target: ResolvedTarget,
     config: FppRunConfig,
 ) -> _PreparedApertureLightCurve:
-    import astropy.time
     import lightkurve as lk
 
     if target.ephemeris is None:
@@ -267,40 +270,19 @@ def _prepare_tpf_lightcurve(
         for tpf, mask in zip(tpfs, aperture_masks)
     ]
     lc_coll = lk.LightCurveCollection(lightcurves)
-    lc = lc_coll.stitch()
-    lc = lc.remove_nans()
-    if len(lc.time) == 0:
-        raise LightCurveNotFoundError(
-            f"TIC {target.tic_id}: all cadences removed after stitch/NaN removal"
-        )
-    if config.lightcurve.sigma_clip is not None:
-        lc = lc.remove_outliers(
-            sigma_upper=config.lightcurve.sigma_clip,
-            sigma_lower=float("inf"),
-        )
-    if config.lightcurve.detrend_method == "flatten":
-        lc = lc.flatten(
-            window_length=config.lightcurve.flatten_window_length,
-            polyorder=config.lightcurve.flatten_polyorder,
-        )
-
-    epoch = astropy.time.Time(target.ephemeris.t0_btjd, format="btjd", scale="tdb")
-    folded = lc.fold(period=target.ephemeris.period_days, epoch_time=epoch)
+    lc = process_lightcurve_collection(lc_coll, config.lightcurve, tic_id=target.tic_id)
+    folded = fold_lightcurve(lc, target.ephemeris)
+    # Preserve lightkurve's binning implementation at the orchestration boundary.
     if config.bin_count is not None:
         folded = folded.bin(bins=config.bin_count)
-    if target.ephemeris.duration_hours is not None:
-        half_window = (
-            config.lightcurve.phase_window_factor * target.ephemeris.duration_hours / 24.0
-        )
-    else:
-        half_window = target.ephemeris.period_days * 0.25
-    trimmed = folded[np.abs(folded.phase.value) < half_window]
-    if len(trimmed) == 0:
-        raise LightCurveEmptyError(
-            f"TIC {target.tic_id}: no cadences in transit window after fold and trim"
-        )
+    trimmed = trim_folded_lightcurve(
+        folded,
+        target.ephemeris,
+        config.lightcurve,
+        tic_id=target.tic_id,
+    )
 
-    cadence_used = LightkurveSource._resolve_cadence(lc, config.lightcurve.cadence)
+    cadence_used = resolve_cadence_label(lc, config.lightcurve.cadence)
     lc_domain = convert_folded_to_domain(trimmed, cadence=cadence_used, config=config.lightcurve)
     sectors_used = _extract_tpf_sectors(tpfs)
     return _PreparedApertureLightCurve(
@@ -348,8 +330,6 @@ def _download_tpfs(
         ],
         cutout_size=(cutout_size, cutout_size),
     )
-
-
 def _resolve_aperture_mask(tpf: object, config: ApertureConfig) -> np.ndarray:
     shape = tpf.shape[1:]  # type: ignore[attr-defined]
     if config.mode == "all":

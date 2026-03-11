@@ -252,6 +252,19 @@ class ValidationWorkspace:
         self._resolved_target = resolved
         return resolved
 
+    def set_resolved_target(self, target: ResolvedTarget) -> None:
+        """Bind a resolved target to the workspace without performing I/O.
+
+        This is intended for higher-level orchestration layers which have already
+        resolved a target and need the workspace assembly path to use that result.
+        """
+        if target.tic_id != self.tic_id:
+            raise ValueError(
+                f"Resolved target TIC ID {target.tic_id} does not match workspace TIC ID "
+                f"{self.tic_id}"
+            )
+        self._resolved_target = target
+
     # -- Flux/depth computation --
 
     def calc_depths(
