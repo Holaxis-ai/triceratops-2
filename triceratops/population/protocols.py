@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -47,6 +48,8 @@ class PopulationSynthesisProvider(Protocol):
         dec_deg: float,
         target_tmag: float,
         cache_path: Path | None = None,
+        *,
+        status_callback: Callable[[str], None] | None = None,
     ) -> TRILEGALResult:
         """Return a background star population for the given sky position.
 

@@ -1,6 +1,7 @@
 """TRILEGAL population assembly: provider query with optional cache."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,8 @@ def assemble_trilegal(
     population_provider: PopulationSynthesisProvider,
     stellar_field: StellarField,
     trilegal_cache_path: str | None,
+    *,
+    status_callback: Callable[[str], None] | None = None,
 ) -> tuple[TRILEGALResult, list[str]]:
     """Fetch TRILEGAL background population for the target star.
 
@@ -34,6 +37,7 @@ def assemble_trilegal(
             dec_deg=target.dec_deg,
             target_tmag=target.tmag,
             cache_path=cache,
+            status_callback=status_callback,
         )
     except Exception as exc:
         raise TRILEGALAcquisitionError(

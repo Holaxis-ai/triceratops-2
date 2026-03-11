@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 from time import sleep
 
@@ -83,6 +84,8 @@ def _poll_until_complete(
     url: str,
     timeout_s: float = 600,
     interval_s: float = 10,
+    *,
+    status_callback: Callable[[str], None] | None = None,
 ) -> None:
     """Poll *url* until TRILEGAL signals normal termination.
 
@@ -102,14 +105,27 @@ def _poll_until_complete(
         If the query does not complete within *timeout_s* seconds.
     """
     deadline = time.monotonic() + timeout_s
+    started = time.monotonic()
     while time.monotonic() < deadline:
         try:
             last = pd.read_csv(url, header=None).iloc[-1:]
         except EmptyDataError:
+            if status_callback is not None:
+                elapsed = time.monotonic() - started
+                status_callback(
+                    f"TRILEGAL still running; waiting for first results "
+                    f"({elapsed:.0f}s elapsed)"
+                )
             time.sleep(interval_s)
             continue
         if last.values[0, 0] == "#TRILEGAL normally terminated":
+            if status_callback is not None:
+                elapsed = time.monotonic() - started
+                status_callback(f"TRILEGAL completed after {elapsed:.0f}s")
             return
+        if status_callback is not None:
+            elapsed = time.monotonic() - started
+            status_callback(f"TRILEGAL still running ({elapsed:.0f}s elapsed)")
         time.sleep(interval_s)
     raise TimeoutError(
         f"TRILEGAL query did not complete within {timeout_s}s. "
@@ -122,6 +138,8 @@ def _download_and_save(
     cache_path: Path,
     poll_timeout_seconds: float = 600,
     poll_interval_seconds: float = 10,
+    *,
+    status_callback: Callable[[str], None] | None = None,
 ) -> Path:
     """Poll the TRILEGAL results URL until complete, then save CSV.
 
@@ -131,6 +149,7 @@ def _download_and_save(
         output_url,
         timeout_s=poll_timeout_seconds,
         interval_s=poll_interval_seconds,
+        status_callback=status_callback,
     )
 
     df = pd.read_csv(output_url, sep=r"\s+")
@@ -145,6 +164,13 @@ class TRILEGALProvider:
     Fixes BUG-07: raises TRILEGALQueryError on failure.
     """
 
+    def __init__(
+        self,
+        *,
+        status_callback: Callable[[str], None] | None = None,
+    ) -> None:
+        self._status_callback = status_callback
+
     def query(
         self,
         ra_deg: float,
@@ -153,6 +179,8 @@ class TRILEGALProvider:
         cache_path: Path | None = None,
         poll_timeout_seconds: float = 600,
         poll_interval_seconds: float = 10,
+        *,
+        status_callback: Callable[[str], None] | None = None,
     ) -> TRILEGALResult:
         """Submit a TRILEGAL web query and return parsed results.
 
@@ -180,7 +208,10 @@ class TRILEGALProvider:
         TRILEGALQueryError:
             On any web or parsing failure (including timeout).
         """
+        callback = status_callback or self._status_callback
         if cache_path is not None and cache_path.exists():
+            if callback is not None:
+                callback(f"Using cached TRILEGAL file {cache_path}")
             return parse_trilegal_csv(cache_path, target_tmag)
 
         if cache_path is None:
@@ -188,18 +219,25 @@ class TRILEGALProvider:
             cache_path = cache_dir / f"trilegal_{ra_deg:.4f}_{dec_deg:.4f}.csv"
 
         try:
+            if callback is not None:
+                callback(f"Submitting TRILEGAL query for ra={ra_deg:.4f}, dec={dec_deg:.4f}")
             output_url = _submit_trilegal_form(ra_deg, dec_deg)
             if output_url is None:
                 raise TRILEGALQueryError(
                     f"TRILEGAL service unavailable for ra={ra_deg}, dec={dec_deg}"
                 )
+            if callback is not None:
+                callback("TRILEGAL accepted query; polling for completion")
             save_to = cache_path
             _download_and_save(
                 output_url,
                 save_to,
                 poll_timeout_seconds=poll_timeout_seconds,
                 poll_interval_seconds=poll_interval_seconds,
+                status_callback=callback,
             )
+            if callback is not None:
+                callback(f"Saved TRILEGAL result to {cache_path}")
             return parse_trilegal_csv(cache_path, target_tmag)
         except TRILEGALQueryError:
             raise
