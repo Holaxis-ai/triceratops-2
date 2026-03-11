@@ -8,6 +8,8 @@ from auto_fpp.artifacts import (
     ARTIFACT_KIND_PREPARED,
     ApertureProvenance,
     ArtifactBundle,
+    ArtifactHistoryEvent,
+    ArtifactStageState,
     PreparedAutoFppArtifact,
     SectorApertureManifest,
     SectorApertureSelection,
@@ -207,6 +209,8 @@ def test_prepared_artifact_round_trips_to_bundle() -> None:
     loaded = PreparedAutoFppArtifact.from_bundle(bundle)
 
     assert loaded.artifact_kind == ARTIFACT_KIND_COMPUTE_READY
+    assert loaded.status == "ready"
+    assert loaded.resume_from is None
     assert loaded.resolved_target.target_ref == "TOI-123.01"
     assert loaded.resolved_target.ephemeris is not None
     assert loaded.resolved_target.ephemeris.warnings == ("depth inferred",)
@@ -227,6 +231,9 @@ def test_prepared_artifact_round_trips_to_bundle() -> None:
     )
     assert loaded.unbinned_light_curve is not None
     np.testing.assert_allclose(loaded.unbinned_light_curve.time_days, unbinned.time_days)
+    assert next(stage for stage in loaded.stages if stage.name == "trilegal").status == (
+        "completed"
+    )
 
 
 def test_artifact_bundle_round_trips_through_directory(tmp_path) -> None:
@@ -280,6 +287,60 @@ def test_make_prepared_artifact_without_trilegal_is_not_compute_ready() -> None:
 
     assert artifact.artifact_kind == ARTIFACT_KIND_PREPARED
     assert artifact.artifact_capabilities.contains_trilegal_population is False
+    assert artifact.status == "partial"
+    assert artifact.resume_from == "trilegal"
+    assert next(stage for stage in artifact.stages if stage.name == "trilegal").status == (
+        "skipped"
+    )
+
+
+def test_manifest_round_trips_stage_and_history_metadata() -> None:
+    artifact = make_prepared_artifact(
+        resolved_target=ResolvedTarget(
+            target_ref="TIC 12345",
+            tic_id=12345,
+            ephemeris=Ephemeris(period_days=5.0, t0_btjd=1000.0),
+            source="manual",
+        ),
+        light_curve_result=_light_curve_result(),
+        stellar_field=_stellar_field(),
+        transit_depth=0.001,
+        aperture_mode="default",
+        aperture_threshold_sigma=3.0,
+        custom_aperture_pixels=(),
+        bin_count=None,
+        search_radius_px=10,
+        sigma_psf_px=0.75,
+        lightcurve_config=LightCurveConfig(),
+        stages=(
+            ArtifactStageState(name="target_resolution", status="completed"),
+            ArtifactStageState(name="lightcurve", status="completed"),
+            ArtifactStageState(name="field", status="completed"),
+            ArtifactStageState(name="trilegal", status="failed"),
+            ArtifactStageState(name="store_upload", status="pending"),
+        ),
+        history=(
+            ArtifactHistoryEvent(
+                stage="trilegal",
+                event="failed",
+                at="2026-03-11T00:00:00Z",
+                message="missing trilegal population",
+            ),
+        ),
+    )
+
+    loaded = PreparedAutoFppArtifact.from_bundle(artifact.to_bundle())
+
+    assert loaded.status == "partial"
+    assert loaded.resume_from == "trilegal"
+    assert [stage.status for stage in loaded.stages] == [
+        "completed",
+        "completed",
+        "completed",
+        "failed",
+        "pending",
+    ]
+    assert loaded.history[0].stage == "trilegal"
 
 
 def test_manifest_includes_sector_aperture_overrides() -> None:
