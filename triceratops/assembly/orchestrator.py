@@ -245,10 +245,11 @@ class DataAssemblyOrchestrator:
     ) -> tuple[LightCurve | None, str, list[str], list[str]]:
         from triceratops.assembly.pipelines.lightcurve import assemble_light_curve
 
+        assert target.ephemeris is not None  # guarded by caller
         return assemble_light_curve(
             self._lc_source,  # type: ignore[arg-type]
             self._artifact_store,
-            target,
+            target.ephemeris,
             config.lc_config,
             config.require_light_curve,
         )

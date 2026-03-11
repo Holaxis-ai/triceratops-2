@@ -526,8 +526,8 @@ class TestLegacyPreparerAdapter:
 
 
 class TestWorkspaceConstructorIO:
-    def test_workspace_constructor_calls_catalog_provider(self) -> None:
-        """ValidationWorkspace constructor calls catalog_provider once (catalog query)."""
+    def test_workspace_constructor_defers_catalog_query(self) -> None:
+        """ValidationWorkspace constructor does NOT query catalog eagerly."""
         sf = _make_stellar_field(12345)
         catalog = _StubCatalogProvider(sf)
 
@@ -537,6 +537,20 @@ class TestWorkspaceConstructorIO:
             sectors=np.array([1]),
             catalog_provider=catalog,
         )
+        assert catalog.call_count == 0
+
+    def test_workspace_catalog_queried_on_first_stars_access(self) -> None:
+        """Catalog is queried lazily on first .stars access."""
+        sf = _make_stellar_field(12345)
+        catalog = _StubCatalogProvider(sf)
+
+        from triceratops.validation.workspace import ValidationWorkspace
+        ws = ValidationWorkspace(
+            tic_id=12345,
+            sectors=np.array([1]),
+            catalog_provider=catalog,
+        )
+        _ = ws.stars
         assert catalog.call_count == 1
 
     def test_workspace_population_provider_not_called_during_construction(self) -> None:

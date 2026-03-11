@@ -178,19 +178,21 @@ class TestWorkspaceConstruction:
         assert workspace.target.tic_id == 12345678
 
     def test_construction_uses_assembly_pipeline(self) -> None:
-        """Workspace construction goes through assemble_stellar_field,
+        """Lazy catalog fetch goes through assemble_stellar_field,
         which wraps catalog errors in CatalogAcquisitionError."""
 
         class _BoomCatalog:
             def query_nearby_stars(self, **kwargs: object) -> object:
                 raise RuntimeError("boom")
 
+        ws = ValidationWorkspace(
+            tic_id=12345678,
+            sectors=np.array([1]),
+            catalog_provider=_BoomCatalog(),
+        )
+        # Construction succeeds (lazy), but first access triggers the error
         with pytest.raises(CatalogAcquisitionError, match="boom"):
-            ValidationWorkspace(
-                tic_id=12345678,
-                sectors=np.array([1]),
-                catalog_provider=_BoomCatalog(),
-            )
+            _ = ws.stars
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +343,8 @@ class TestComputeProbsScenarioIdsPath:
         registry = ScenarioRegistry()
         ws = self._make_workspace_with_registry(registry)
 
-        # Corrupt the field: swap target for a wrong star so stars[0].tic_id != target_id
+        # Trigger lazy fetch so _stellar_field is populated, then corrupt it
+        _ = ws.stars
         wrong_star = _neighbor_star(tic_id=99999999)
         ws._stellar_field.stars[0] = wrong_star  # direct corruption — bypasses guards
 
