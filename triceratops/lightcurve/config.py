@@ -15,6 +15,7 @@ class LightCurveConfig:
 
     # --- basic parameters ---
     sectors: tuple[int, ...] | Literal["all", "auto"] = "auto"
+    source: Literal["pdcsap", "sap", "tpf"] = "pdcsap"
     cadence: Literal["20sec", "2min", "10min", "30min", "auto"] = "auto"
     quality_mask: Literal["none", "default", "hard"] = "default"
     detrend_method: Literal["flatten", "none"] = "none"
@@ -24,7 +25,6 @@ class LightCurveConfig:
     flatten_window_length: int = 401
     flatten_polyorder: int = 3
     phase_window_factor: float = 2.0
-    flux_type: Literal["pdcsap_flux", "sap_flux"] = "pdcsap_flux"
     cadence_days_override: float | None = None
     supersampling_rate: int = 20
 

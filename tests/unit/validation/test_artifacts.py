@@ -211,6 +211,8 @@ def test_prepared_artifact_round_trips_to_bundle() -> None:
             mission="TESS",
             quality_mask="default",
             cutout_size=(21, 21),
+            source_kind="lightcurve",
+            flux_type="pdcsap_flux",
             selected_products=(
                 LightkurveSelectedProduct(
                     sector=14,
@@ -284,6 +286,8 @@ def test_prepared_artifact_round_trips_to_bundle() -> None:
     )
     assert loaded.lightcurve_provenance is not None
     assert loaded.lightcurve_provenance.search_target == "TIC 12345"
+    assert loaded.lightcurve_provenance.source_kind == "lightcurve"
+    assert loaded.lightcurve_provenance.flux_type == "pdcsap_flux"
     assert loaded.lightcurve_provenance.selected_products[0].row_identity["obsid"] == 1001
     assert len(loaded.lightcurve_variants) == 1
     assert loaded.lightcurve_variants[0].bin_count == 500
