@@ -22,6 +22,10 @@ from auto_fpp.store import (
     R2PreparedArtifactStore,
     StoredArtifactRef,
     WranglerPreparedArtifactStore,
+    _bundle_file_names_from_manifest,
+    _content_type,
+    _endpoint_from_account_id,
+    _parse_r2_locator,
     default_artifact_key,
 )
 from triceratops.domain.entities import LightCurve, Star, StellarField
@@ -356,6 +360,69 @@ def test_r2_store_build_client_rejects_partial_credentials(monkeypatch) -> None:
         R2PreparedArtifactStore(bucket="science-artifacts")
 
 
+def test_r2_store_build_client_requires_endpoint_or_account(monkeypatch) -> None:
+    monkeypatch.delenv("CLOUDFLARE_R2_ENDPOINT_URL", raising=False)
+    monkeypatch.delenv("CLOUDFLARE_R2_ACCOUNT_ID", raising=False)
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "boto3",
+        SimpleNamespace(client=lambda **kwargs: object()),
+    )
+
+    with pytest.raises(ValueError, match="requires either endpoint_url or account_id"):
+        R2PreparedArtifactStore(bucket="science-artifacts")
+
+
+def test_store_helper_functions_cover_locator_manifest_and_content_type() -> None:
+    assert _endpoint_from_account_id(" acct-123 ") == "https://acct-123.r2.cloudflarestorage.com"
+    assert _endpoint_from_account_id(" ") is None
+
+    assert _parse_r2_locator("r2://bucket/prefix/key") == ("bucket", "prefix/key")
+    assert _parse_r2_locator("wrangler-r2://bucket/prefix/key") == ("bucket", "prefix/key")
+    with pytest.raises(ValueError, match="Expected R2 locator"):
+        _parse_r2_locator("/tmp/local")
+
+    assert _bundle_file_names_from_manifest(
+        {"artifact_kind": "prepare_checkpoint_target_resolution"}
+    ) == ["manifest.json"]
+    assert _bundle_file_names_from_manifest(
+        {
+            "artifact_kind": "prepare_checkpoint_lightcurve",
+            "files": {"lightcurve_provenance": "lightcurve_provenance.json"},
+        }
+    ) == [
+        "manifest.json",
+        "prepared_lightcurve.npz",
+        "sector_geometry.json",
+        "lightcurve_provenance.json",
+    ]
+
+    names = _bundle_file_names_from_manifest(
+        {
+            "artifact_kind": "prepared_compute_inputs",
+            "files": {
+                "aperture_provenance": "aperture_provenance.json",
+                "lightcurve_provenance": "lightcurve_provenance.json",
+                "trilegal_population": "trilegal_population.npz",
+                "contrast_curve": "contrast_curve.npz",
+            },
+            "lightcurve_variants": [{"file": "lightcurves/bin-100.npz"}],
+            "extra_files": ["tables/stars.csv"],
+        }
+    )
+    assert "trilegal_population.npz" in names
+    assert "lightcurves/bin-100.npz" in names
+    assert "tables/stars.csv" in names
+
+    assert _content_type("manifest.json") == "application/json"
+    assert _content_type("tables/stars.csv") == "text/csv"
+    assert _content_type("plots/fits.pdf") == "application/pdf"
+    assert _content_type("prepared_lightcurve.npz") == "application/octet-stream"
+    assert _content_type("raw.bin") == "application/octet-stream"
+
+
 class _FakeWranglerRunner:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
@@ -435,3 +502,52 @@ def test_wrangler_store_rejects_non_wrangler_ref() -> None:
         assert "store_kind='r2'" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("Expected ValueError for non-Wrangler ref")
+
+
+def test_wrangler_store_validates_bucket_replace_and_run_flags(tmp_path) -> None:
+    runner = _FakeWranglerRunner()
+    store = WranglerPreparedArtifactStore(
+        bucket=None,
+        key_prefix="prepared",
+        wrangler_bin="npx-wrangler",
+        cwd=tmp_path,
+        config_path=tmp_path / "wrangler.toml",
+        env_name="prod",
+        runner=runner,
+    )
+
+    with pytest.raises(ValueError, match="requires a bucket for put"):
+        store.put(_artifact(), key="tic-12345")
+
+    with pytest.raises(ValueError, match="store_kind='filesystem'"):
+        store.replace(
+            StoredArtifactRef(
+                key="artifact",
+                locator="/tmp/artifact",
+                store_kind="filesystem",
+            ),
+            _artifact(),
+        )
+
+    captured: list[list[str]] = []
+
+    def _capture_runner(cmd, **kwargs):
+        captured.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    flag_store = WranglerPreparedArtifactStore(
+        bucket="science-artifacts",
+        wrangler_bin="npx-wrangler",
+        cwd=tmp_path,
+        config_path=tmp_path / "wrangler.toml",
+        env_name="prod",
+        runner=_capture_runner,
+    )
+    flag_store._run(["whoami"])
+    assert captured[0][:5] == [
+        "npx-wrangler",
+        "--config",
+        str(tmp_path / "wrangler.toml"),
+        "--env",
+        "prod",
+    ]
