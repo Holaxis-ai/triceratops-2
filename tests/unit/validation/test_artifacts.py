@@ -1,6 +1,8 @@
 """Tests for durable auto-FPP artifacts."""
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 from auto_fpp.artifacts import (
@@ -753,9 +755,15 @@ def test_preparation_outputs_are_added_and_round_trip() -> None:
     )
 
     assert "tables/stars.csv" in artifact.extra_files
+    assert "tables/run_summary.json" in artifact.extra_files
     assert "plots/field.pdf" in artifact.extra_files
+    run_summary = json.loads(artifact.extra_files["tables/run_summary.json"].decode("utf-8"))
+    assert run_summary["target"]["tic_id"] == 12345
+    assert run_summary["lightcurve"]["point_reduction"] == "bin"
+    assert run_summary["field"]["n_stars"] == 2
     loaded = PreparedAutoFppArtifact.from_bundle(artifact.to_bundle())
     assert "tables/stars.csv" in loaded.extra_files
+    assert "tables/run_summary.json" in loaded.extra_files
     assert "plots/field.pdf" in loaded.extra_files
 
 
@@ -788,21 +796,27 @@ def test_compute_outputs_are_added_and_round_trip() -> None:
             false_positive_probability=0.1,
             nearby_false_positive_probability=0.02,
             scenario_results=[_scenario_result()],
+            rng_seed=42,
         ),
         workspace=None,  # type: ignore[arg-type]
     )
 
     assert "tables/probs.csv" in updated.extra_files
     assert "tables/scenario_probabilities.csv" in updated.extra_files
+    assert "tables/run_summary.json" in updated.extra_files
     assert "plots/fits.pdf" in updated.extra_files
     probs_text = updated.extra_files["tables/probs.csv"].decode("utf-8")
     assert "ID" in probs_text
     assert "scenario" in probs_text
     assert "lnZ" in probs_text
     assert "flux_ratio_comp_T" in probs_text
+    run_summary = json.loads(updated.extra_files["tables/run_summary.json"].decode("utf-8"))
+    assert run_summary["compute"]["rng_seed"] == 42
+    assert run_summary["compute"]["fpp"] == 0.1
     loaded = PreparedAutoFppArtifact.from_bundle(updated.to_bundle())
     assert "tables/probs.csv" in loaded.extra_files
     assert "tables/scenario_probabilities.csv" in loaded.extra_files
+    assert "tables/run_summary.json" in loaded.extra_files
     assert "plots/fits.pdf" in loaded.extra_files
 
 
