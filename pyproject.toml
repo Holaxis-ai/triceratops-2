@@ -45,6 +45,7 @@ include = ["triceratops*", "auto_fpp*"]
 
 [tool.setuptools.package-data]
 "triceratops.data" = ["*.csv"]
+"auto_fpp.api" = ["web/*.html", "web/*.css", "web/*.js"]
 
 [tool.ruff]
 line-length = 100
