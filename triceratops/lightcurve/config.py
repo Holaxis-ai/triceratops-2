@@ -19,7 +19,7 @@ class LightCurveConfig:
     cadence: Literal["20sec", "2min", "10min", "30min", "auto"] = "auto"
     quality_mask: Literal["none", "default", "hard"] = "default"
     detrend_method: Literal["flatten", "none"] = "none"
-    sigma_clip: float | None = 5.0
+    sigma_clip: float | None = None
 
     # --- advanced parameters ---
     flatten_window_length: int = 401

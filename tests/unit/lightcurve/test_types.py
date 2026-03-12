@@ -93,7 +93,7 @@ class TestLightCurveConfig:
     def test_default_config_is_valid(self):
         cfg = LightCurveConfig()
         assert cfg.cadence == "auto"
-        assert cfg.sigma_clip == 5.0
+        assert cfg.sigma_clip is None
         assert cfg.detrend_method == "none"
         assert cfg.supersampling_rate == 20
 
