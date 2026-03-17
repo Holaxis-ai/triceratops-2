@@ -8,7 +8,7 @@ version = "0.3.0.dev0"
 description = "Bayesian false-positive probability calculator for candidate exoplanets"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
@@ -21,6 +21,11 @@ dependencies = [
     "pandas>=2.0",
     "tomli>=2.0; python_version < '3.11'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/holaxis/triceratops"
+Repository = "https://github.com/holaxis/triceratops"
+Documentation = "https://holaxis.github.io/triceratops"
 
 [project.optional-dependencies]
 dev = [

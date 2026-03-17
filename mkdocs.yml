@@ -1,6 +1,6 @@
 site_name: TRICERATOPS
 site_description: Bayesian false-positive probability calculator for candidate exoplanets
-repo_url: https://github.com/collier/triceratops-fast
+repo_url: https://github.com/holaxis/triceratops
 
 theme:
   name: material

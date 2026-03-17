@@ -1,12 +1,16 @@
 # TRICERATOPS
 
-TRICERATOPS — Bayesian false-positive probability calculator for candidate exoplanets.
+Bayesian false-positive probability calculator for candidate exoplanets.
 
 ## Quick start
 
 ```python
-import triceratops
-from triceratops.validation.workspace import ValidationWorkspace
+from triceratops import ValidationWorkspace, LightCurve
+
+ws = ValidationWorkspace(tic_id=237101326, sectors=[1, 2])
+
+result = ws.compute_probs(light_curve=lc, period_days=5.0)
+print(f"FPP = {result.fpp:.4f}")
 ```
 
 ## API Reference
