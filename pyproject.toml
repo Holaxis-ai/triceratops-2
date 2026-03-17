@@ -23,9 +23,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Holaxis-ai/triceratops"
-Repository = "https://github.com/Holaxis-ai/triceratops"
-Documentation = "https://Holaxis-ai.github.io/triceratops"
+Homepage = "https://github.com/Holaxis-ai/triceratops-2"
+Repository = "https://github.com/Holaxis-ai/triceratops-2"
+Documentation = "https://Holaxis-ai.github.io/triceratops-2"
 
 [project.optional-dependencies]
 dev = [
