@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "triceratops-new"
-version = "0.2.0.dev0"
+name = "holaxis-triceratops"
+version = "0.3.0.dev0"
 description = "TRICERATOPS+ rewrite: astrophysical false-positive probability calculator"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,6 +39,10 @@ dev = [
 ]
 r2 = [
     "boto3>=1.34",
+]
+docs = [
+    "mkdocs-material",
+    "mkdocstrings[python]",
 ]
 
 [tool.setuptools.packages.find]
