@@ -70,6 +70,10 @@ formulas, affected scenarios, and before/after comparisons.
 
 ## Documentation
 
+**[API Reference](https://Holaxis-ai.github.io/triceratops/)** — auto-generated from docstrings.
+
+To serve locally:
+
 ```bash
 pip install "holaxis-triceratops[docs]"
 mkdocs serve
