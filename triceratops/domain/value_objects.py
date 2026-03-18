@@ -90,11 +90,28 @@ class ContrastCurve:
     """AO or speckle contrast curve: angular separation vs achievable delta-magnitude.
 
     Separations must be in ascending order.
+
+    Raises:
+        ValueError: If separations_arcsec or delta_mags are empty or have
+            mismatched lengths.
     """
 
     separations_arcsec: np.ndarray   # ascending, shape (M,)
     delta_mags: np.ndarray           # corresponding contrast limits, shape (M,)
     band: str                        # filter label, e.g. "J", "K"
+
+    def __post_init__(self) -> None:
+        sep = np.asarray(self.separations_arcsec)
+        dmag = np.asarray(self.delta_mags)
+        if sep.size == 0 or dmag.size == 0:
+            raise ValueError(
+                "ContrastCurve requires non-empty separations_arcsec and delta_mags arrays"
+            )
+        if sep.shape != dmag.shape:
+            raise ValueError(
+                f"ContrastCurve separations_arcsec and delta_mags must have the same shape, "
+                f"got {sep.shape} and {dmag.shape}"
+            )
 
     def max_detectable_delta_mag(self, separation_arcsec: float) -> float:
         """Interpolate the contrast limit at a given angular separation.

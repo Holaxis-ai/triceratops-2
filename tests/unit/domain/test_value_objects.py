@@ -64,6 +64,22 @@ class TestContrastCurve:
         expected = np.interp(0.75, cc.separations_arcsec, cc.delta_mags)
         assert abs(val - expected) < 1e-10
 
+    def test_contrast_curve_rejects_empty_separations(self) -> None:
+        with pytest.raises(ValueError, match="non-empty"):
+            ContrastCurve(
+                separations_arcsec=np.array([]),
+                delta_mags=np.array([]),
+                band="K",
+            )
+
+    def test_contrast_curve_rejects_mismatched_shapes(self) -> None:
+        with pytest.raises(ValueError, match="same shape"):
+            ContrastCurve(
+                separations_arcsec=np.array([0.1, 0.5]),
+                delta_mags=np.array([1.0]),
+                band="K",
+            )
+
 
 class TestLimbDarkeningCoeffs:
     def test_ldc_as_ldc_array_shape(self) -> None:
