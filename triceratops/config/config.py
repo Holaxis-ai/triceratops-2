@@ -135,11 +135,10 @@ class Config:
     -1 — one worker per scenario up to os.cpu_count().
     N  — exactly N worker processes.
 
-    Note: parallel workers each receive an independent OS-entropy RNG seed.
-    For fully reproducible parallel runs pass an explicit seed via
-    np.random.seed() before calling calc_probs with n_workers=0, or use
-    n_workers=0 and rely on Config.parallel=True for intra-scenario
-    vectorisation.
+    Note: scenario-level multiprocessing (``n_workers != 0``) is not supported
+    together with an explicit ``seed``. Use ``n_workers=0`` when you need
+    seeded/reproducible runs; ``parallel=True`` still enables intra-scenario
+    vectorisation in that mode.
     """
 
     def __post_init__(self) -> None:
@@ -158,6 +157,11 @@ class Config:
             raise ValueError(f"Unknown mission {self.mission!r}")
         if self.n_workers < -1:
             raise ValueError(f"n_workers must be >= -1, got {self.n_workers}")
+        if self.seed is not None and self.n_workers != 0:
+            raise ValueError(
+                "seeded scenario-level multiprocessing is not supported: "
+                "use n_workers=0 for reproducible runs"
+            )
         if self.numerical_mode not in ("corrected", "legacy"):
             raise ValueError(
                 "numerical_mode must be 'corrected' or 'legacy', "
