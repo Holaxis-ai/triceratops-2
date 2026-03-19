@@ -3,15 +3,19 @@
 Append-only record of every intentional change to TRICERATOPS+ output values.
 
 Each entry documents: what changed, why the old behaviour was wrong, what the
-correct formula is, which scenarios and metrics are affected, and the direction
-of the FPP shift.  Entries are ordered chronologically.  The golden JSON files
+correct formula is, which scenarios and metrics are affected, and the expected
+scenario-family shift. Net headline FPP/NFPP movement is often target-dependent
+because all scenario probabilities renormalize together after the fix. Entries
+are ordered chronologically. The golden JSON files
 in this directory are always updated at the same commit as the entry that
 describes them.
 
 The target `golden/*.json` files track **triceratops-fast output** after all
 applied fixes.  The vendor TRICERATOPS+ output is preserved in comments below
 for reference; it differs from the golden values because it contains the bugs
-that are fixed here.
+that are fixed here. For parity investigations against vendor
+TRICERATOPS+, use `numerical_mode="legacy"`; the golden fixtures remain the
+corrected-mode reference.
 
 ---
 
@@ -20,8 +24,8 @@ that are fixed here.
 **Commit:** `366e443d`
 **Date:** 2026-03-09
 **Status:** Applied
-**Affects FPP:** Yes (decreases — background false-positive scenarios gain
-probability mass)
+**Affects FPP:** Yes (net direction is target-dependent; tends to increase the
+relative weight of heavy-tail false-positive scenarios)
 **Affects NFPP:** Yes (can change, direction depends on target)
 
 ### Affected scenarios
@@ -73,16 +77,23 @@ values for compatibility. That offset was later removed once the stable
 log-sum-exp implementation was adopted everywhere and no caller needed the
 old shifted scale.
 
-### Observed FPP shift (TOI-4051, n=10 000, seed=42)
+### Observed shift (target-dependent)
 
 | Metric | Vendor (buggy) | triceratops-fast (fixed) |
 |--------|---------------|--------------------------|
 | FPP    | 0.999173      | 0.996334                 |
 | NFPP   | 0.000146      | 0.000000                 |
 
-Note: NFPP reaching 0.0 reflects that for this target the nearby-star
-scenarios (NEB, NEBx2P) were also affected by the underflow — their
-lnZ values were -inf in the original code.
+This target moved downward in FPP because previously underweighted
+false-positive scenarios regained probability mass. That direction is not
+universal. For example, on `TOI-205.01` at `n=1,000,000`, `seed=17`, the
+corrected-mode run shifts probability mass out of `DTP` and into
+`TP/PTP/STP`, raising FPP from `0.016659227756992467` (`legacy`) to
+`0.01874191364346589` (`corrected`).
+
+Note: NFPP reaching 0.0 for `TOI-4051` reflects that nearby-star scenarios
+(`NEB`, `NEBx2P`) were also affected by the underflow — their lnZ values were
+`-inf` in the original code.
 
 ---
 
@@ -149,8 +160,8 @@ recorded in the golden files.
 **Commit:** `931230f2`
 **Date:** 2026-03-09
 **Status:** Applied
-**Affects FPP:** Yes (decreases — background false-positive scenarios gain
-probability mass)
+**Affects FPP:** Yes (net direction is target-dependent; tends to increase the
+relative weight of background scenarios)
 **Affects NFPP:** No (nearby-star scenarios are unaffected)
 
 ### Affected scenarios
@@ -195,12 +206,21 @@ For TESS-typical separations (~2–10 arcsec) the prior difference is
 `log(s²) × (1 - 1/log10) ≈ 1.3–3.0` log-units per sample, accumulating
 over 1M draws to a systematic lnZ bias of hundreds of units.
 
-### FPP shift
+### Net FPP interpretation
 
-FPP **decreases** after this fix (background scenarios gain additional
-probability mass beyond the NC-01 shift).  The exact magnitude depends on
-the target's neighbour density.  Golden files were updated at the same
-commit that applied this fix.
+This fix increases background-scenario priors, especially for
+`BTP/BEB/BEBx2P/DTP/DEB/DEBx2P`. In isolation that tends to push headline FPP
+down, but the final net direction is still target-dependent after all scenario
+families renormalize together.
+
+`TOI-205.01` is a concrete example where the corrected mode still ends up with
+higher FPP overall at `n=1,000,000`, `seed=17`:
+
+- `legacy`: `FPP = 0.016659227756992467`
+- `corrected`: `FPP = 0.01874191364346589`
+
+For that target, corrected mode reduces `DTP` but increases `TP`, `PTP`, and
+`STP` enough that the net FPP rises.
 
 ### Call sites
 
