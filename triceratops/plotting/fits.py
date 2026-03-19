@@ -200,10 +200,12 @@ def _build_axes(nrows: int):
 
 
 def _annotate_axis(ax, sr: ScenarioResult, validation_result: ValidationResult) -> None:
-    host_label = (
-        str(sr.host_star_tic_id) if sr.host_star_tic_id != 0
-        else str(validation_result.target_id)
-    )
+    if sr.host_star_tic_id != 0:
+        host_label = str(sr.host_star_tic_id)
+    elif sr.scenario_id in ScenarioID.nearby_scenarios():
+        host_label = "unknown"
+    else:
+        host_label = str(validation_result.target_id)
     ax.annotate(host_label, xy=(0.05, 0.92), xycoords="axes fraction", fontsize=12)
     ax.annotate(str(sr.scenario_id), xy=(0.05, 0.05), xycoords="axes fraction", fontsize=12)
 
@@ -316,7 +318,11 @@ def plot_fits_palomar(
 
     lc = external_light_curve.light_curve
     if x_range is None or len(x_range) == 0:
-        reference_time = lc.time_days if reference_light_curve is None else reference_light_curve.time_days
+        reference_time = (
+            lc.time_days
+            if reference_light_curve is None
+            else reference_light_curve.time_days
+        )
         model_time = np.linspace(
             float(np.min(reference_time)),
             float(np.max(reference_time)),

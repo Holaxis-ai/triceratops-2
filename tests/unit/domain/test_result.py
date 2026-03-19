@@ -66,3 +66,32 @@ class TestValidationResult:
             scenario_results=[],
         )
         assert vr.get_scenario(ScenarioID.NTP) is None
+
+    def test_validation_result_get_scenarios_returns_all_matches(self) -> None:
+        sr_one = _make_scenario_result(ScenarioID.NTP)
+        sr_two = _make_scenario_result(ScenarioID.NTP)
+        sr_two.host_star_tic_id = 87654321
+        vr = ValidationResult(
+            target_id=100,
+            false_positive_probability=0.05,
+            nearby_false_positive_probability=0.01,
+            scenario_results=[sr_one, sr_two],
+        )
+
+        assert vr.get_scenarios(ScenarioID.NTP) == [sr_one, sr_two]
+
+    def test_validation_result_get_scenario_warns_for_duplicate_rows(self) -> None:
+        sr_one = _make_scenario_result(ScenarioID.NTP)
+        sr_two = _make_scenario_result(ScenarioID.NTP)
+        sr_two.host_star_tic_id = 87654321
+        vr = ValidationResult(
+            target_id=100,
+            false_positive_probability=0.05,
+            nearby_false_positive_probability=0.01,
+            scenario_results=[sr_one, sr_two],
+        )
+
+        with pytest.warns(UserWarning, match="Use get_scenarios"):
+            result = vr.get_scenario(ScenarioID.NTP)
+
+        assert result is sr_one

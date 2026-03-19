@@ -1,6 +1,7 @@
 """Result types: outputs of scenario computation and validation runs."""
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -76,8 +77,25 @@ class ValidationResult:
         return self.nearby_false_positive_probability
 
     def get_scenario(self, scenario_id: ScenarioID) -> ScenarioResult | None:
-        """Return the ScenarioResult for the given ID, or None if not found."""
-        for r in self.scenario_results:
-            if r.scenario_id == scenario_id:
-                return r
-        return None
+        """Return the first ScenarioResult for the given ID, or None if not found.
+
+        When multiple rows share a ScenarioID, this retains the historical
+        first-match behavior but warns because nearby parity expands NTP/NEB
+        per eligible host. Callers that need host-specific nearby rows should
+        use get_scenarios().
+        """
+        matches = self.get_scenarios(scenario_id)
+        if not matches:
+            return None
+        if len(matches) > 1:
+            warnings.warn(
+                f"Multiple ScenarioResults found for {scenario_id.name}; "
+                "returning the first match. Use get_scenarios() for "
+                "host-specific nearby rows.",
+                stacklevel=2,
+            )
+        return matches[0]
+
+    def get_scenarios(self, scenario_id: ScenarioID) -> list[ScenarioResult]:
+        """Return all ScenarioResults for the given ID."""
+        return [r for r in self.scenario_results if r.scenario_id == scenario_id]
