@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from triceratops.domain.entities import LightCurve
+from triceratops.domain.entities import ExternalLightCurve, LightCurve
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.plotting.fits import _tess_plot_light_curve
+from triceratops.plotting import fits as fits_module
+from triceratops.plotting.fits import (
+    _plottable_scenarios,
+    _tess_plot_light_curve,
+    plot_fits_joint,
+)
 
 
 def _scenario_result(scenario_id: ScenarioID, *, host_star_tic_id: int) -> ScenarioResult:
@@ -93,3 +99,54 @@ def test_tess_plot_light_curve_falls_back_without_host_flux_ratio() -> None:
     plotted = _tess_plot_light_curve(light_curve, scenario_result, validation_result)
 
     assert plotted is light_curve
+
+
+def test_plottable_scenarios_prefers_high_probability_rows_when_truncated() -> None:
+    low = _scenario_result(ScenarioID.NTP, host_star_tic_id=1)
+    low.relative_probability = 0.1
+    high = _scenario_result(ScenarioID.NTP, host_star_tic_id=2)
+    high.relative_probability = 0.9
+    validation_result = ValidationResult(
+        target_id=123,
+        false_positive_probability=0.1,
+        nearby_false_positive_probability=0.01,
+        scenario_results=[low, high],
+    )
+
+    grouped = _plottable_scenarios(validation_result, max_per_column=1)
+
+    assert grouped[0] == [high]
+
+
+def test_plot_fits_joint_uses_host_renormed_tess_curve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    light_curve = _light_curve()
+    external_lc = ExternalLightCurve(light_curve=_light_curve(), band="J")
+    scenario_result = _scenario_result(ScenarioID.NTP, host_star_tic_id=42)
+    scenario_result.relative_probability = 0.5
+    validation_result = _validation_result(scenario_result, flux_ratio_map={42: 0.25})
+    seen_fluxes: list[np.ndarray] = []
+
+    def _fake_best_fit_model(model_time, sr, lc, *, external_lc_index=None):
+        _ = (sr, external_lc_index)
+        seen_fluxes.append(np.asarray(lc.flux))
+        return np.ones_like(model_time)
+
+    monkeypatch.setattr(fits_module, "_best_fit_model", _fake_best_fit_model)
+    monkeypatch.setattr(fits_module, "_finalize_plot", lambda *args, **kwargs: None)
+
+    plot_fits_joint(
+        light_curve,
+        external_lc,
+        validation_result,
+        nrows=1,
+        save=False,
+    )
+
+    assert len(seen_fluxes) == 2
+    np.testing.assert_allclose(seen_fluxes[0], external_lc.light_curve.flux)
+    np.testing.assert_allclose(
+        seen_fluxes[1],
+        (light_curve.flux - 0.75) / 0.25,
+    )

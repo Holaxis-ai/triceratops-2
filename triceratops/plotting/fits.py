@@ -156,9 +156,14 @@ def _plottable_scenarios(
         if len(result.host_mass_msun) == 0:
             continue
         column = _column_for_scenario(result.scenario_id)
-        if max_per_column is not None and len(columns[column]) >= max_per_column:
-            continue
         columns[column].append(result)
+    for idx, column_results in enumerate(columns):
+        column_results.sort(
+            key=lambda result: result.relative_probability,
+            reverse=True,
+        )
+        if max_per_column is not None:
+            columns[idx] = column_results[:max_per_column]
     return columns
 
 
@@ -455,6 +460,11 @@ def plot_fits_joint(
                 ax.axis("off")
                 continue
             sr = column_results[row_index]
+            plotted_tess_light_curve = _tess_plot_light_curve(
+                light_curve,
+                sr,
+                validation_result,
+            )
             y_formatter = ticker.ScalarFormatter(useOffset=False)
             ax.yaxis.set_major_formatter(y_formatter)
             ax.errorbar(
@@ -477,7 +487,11 @@ def plot_fits_joint(
                     lc,
                     external_lc_index=external_lc_index,
                 )
-                tess_model = _best_fit_model(model_time, sr, light_curve)
+                tess_model = _best_fit_model(
+                    model_time,
+                    sr,
+                    plotted_tess_light_curve,
+                )
             except Exception:  # noqa: BLE001
                 external_model = np.ones(len(model_time))
                 tess_model = np.ones(len(model_time))

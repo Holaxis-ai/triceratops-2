@@ -79,6 +79,13 @@ The runtime config also supports two numerical modes:
 `legacy` is intended for parity validation and migration checks, not normal
 forward use. `corrected` remains the default mode for new computations.
 
+`legacy` only restores the documented numerical behavior needed for parity
+checks. It does not imply blanket emulation of every historical code path or
+every optional input mode. In particular, nearby-host execution now follows the
+validated per-neighbor parity path used by this rewrite, and external follow-up
+light-curve parity for nearby hosts is still a deferred edge case rather than a
+supported compatibility guarantee.
+
 See [PARITY.md](PARITY.md) for the full numerical changes log with
 formulas, affected scenarios, and before/after comparisons.
 
