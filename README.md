@@ -67,8 +67,7 @@ result = ws.compute_prepared(prepared)
 
 This implementation reproduces the original TRICERATOPS results with four
 documented bug fixes in the underlying numerics. All corrections are
-conservative (FPP decreases slightly) and are verified by deterministic
-golden regression tests at fixed random seeds.
+verified by deterministic golden regression tests at fixed random seeds.
 
 See [PARITY.md](PARITY.md) for the full numerical changes log with
 formulas, affected scenarios, and before/after comparisons.
