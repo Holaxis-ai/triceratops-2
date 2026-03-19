@@ -228,8 +228,12 @@ class ValidationEngine:
 
         host_magnitudes = self._extract_host_magnitudes(stellar_field.target)
         target_flux_ratio = stellar_field.target.flux_ratio
+        nearby_host_flux_ratio = self._select_nearby_host_flux_ratio(stellar_field)
         renormed_target_lc = self._renorm_light_curve_for_host(
             light_curve, target_flux_ratio,
+        )
+        renormed_nearby_lc = self._renorm_light_curve_for_host(
+            light_curve, nearby_host_flux_ratio,
         )
 
         stellar_params = stellar_field.target.stellar_params
@@ -260,7 +264,7 @@ class ValidationEngine:
             ScenarioExecutionContext(
                 scenario=scenario,
                 light_curve=(
-                    light_curve if scenario.scenario_id in nearby_ids
+                    renormed_nearby_lc if scenario.scenario_id in nearby_ids
                     else renormed_target_lc
                 ),
                 stellar_params=stellar_params,
@@ -412,6 +416,32 @@ class ValidationEngine:
         if flux_ratio <= 0.0 or flux_ratio > 1.0:
             return light_curve
         return light_curve.with_renorm(flux_ratio)
+
+    @staticmethod
+    def _select_nearby_host_flux_ratio(
+        stellar_field: StellarField,
+    ) -> float | None:
+        """Select the brightest valid nearby-host candidate for LC renormalization.
+
+        Nearby scenarios model an eclipsed contaminant host rather than the
+        target star. The folded light curve therefore needs to be renormalized
+        to a plausible contaminant flux contribution before those scenarios are
+        evaluated. We use the brightest nearby star that is still capable of
+        hosting the observed event (positive transit_depth_required).
+        """
+        candidate_flux_ratios = [
+            float(star.flux_ratio)
+            for star in stellar_field.neighbors
+            if (
+                star.flux_ratio is not None
+                and star.transit_depth_required is not None
+                and star.transit_depth_required > 0.0
+                and star.flux_ratio > 0.0
+            )
+        ]
+        if not candidate_flux_ratios:
+            return None
+        return max(candidate_flux_ratios)
 
     @staticmethod
     def _aggregate(

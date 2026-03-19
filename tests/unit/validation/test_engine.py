@@ -568,10 +568,25 @@ class TestEngineCompute:
             transit_lc.sigma / 0.8
         )
 
-    def test_compute_keeps_raw_light_curve_for_nearby_scenarios(
+    def test_compute_renorms_nearby_host_light_curve_before_dispatch(
         self, transit_lc, stellar_field, small_config,
     ) -> None:
         stellar_field.target.flux_ratio = 0.8
+        neighbor = Star(
+            tic_id=87654321,
+            ra_deg=83.83,
+            dec_deg=-5.40,
+            tmag=13.0,
+            jmag=12.0,
+            hmag=11.8,
+            kmag=11.7,
+            bmag=14.0,
+            vmag=13.5,
+            stellar_params=stellar_field.target.stellar_params,
+            flux_ratio=0.5,
+            transit_depth_required=0.02,
+        )
+        stellar_field.stars.append(neighbor)
         ntp_result = _make_result(ScenarioID.NTP, lnZ=0.0)
         fake_ntp = _RecordingScenario(ScenarioID.NTP, False, ntp_result)
 
@@ -587,7 +602,64 @@ class TestEngineCompute:
             scenario_ids=[ScenarioID.NTP],
         )
 
-        assert fake_ntp.seen_light_curve is transit_lc
+        assert fake_ntp.seen_light_curve is not None
+        expected_flux = (transit_lc.flux - 0.5) / 0.5
+        assert fake_ntp.seen_light_curve.flux == pytest.approx(expected_flux)
+        assert fake_ntp.seen_light_curve.sigma == pytest.approx(
+            transit_lc.sigma / 0.5
+        )
+
+    def test_select_nearby_host_flux_ratio_uses_brightest_valid_candidate(
+        self, stellar_field,
+    ) -> None:
+        stellar_field.stars.extend(
+            [
+                Star(
+                    tic_id=111,
+                    ra_deg=83.81,
+                    dec_deg=-5.41,
+                    tmag=13.0,
+                    jmag=12.0,
+                    hmag=11.9,
+                    kmag=11.8,
+                    bmag=14.0,
+                    vmag=13.4,
+                    stellar_params=stellar_field.target.stellar_params,
+                    flux_ratio=0.1,
+                    transit_depth_required=0.03,
+                ),
+                Star(
+                    tic_id=222,
+                    ra_deg=83.84,
+                    dec_deg=-5.42,
+                    tmag=14.0,
+                    jmag=13.0,
+                    hmag=12.9,
+                    kmag=12.8,
+                    bmag=15.0,
+                    vmag=14.4,
+                    stellar_params=stellar_field.target.stellar_params,
+                    flux_ratio=0.4,
+                    transit_depth_required=0.02,
+                ),
+                Star(
+                    tic_id=333,
+                    ra_deg=83.85,
+                    dec_deg=-5.43,
+                    tmag=15.0,
+                    jmag=14.0,
+                    hmag=13.9,
+                    kmag=13.8,
+                    bmag=16.0,
+                    vmag=15.4,
+                    stellar_params=stellar_field.target.stellar_params,
+                    flux_ratio=0.6,
+                    transit_depth_required=0.0,
+                ),
+            ]
+        )
+
+        assert ValidationEngine._select_nearby_host_flux_ratio(stellar_field) == pytest.approx(0.4)
 
     def test_compute_converts_empty_ntp_peers_into_warning_and_neg_inf_result(
         self, transit_lc, stellar_field, small_config,
