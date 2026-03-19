@@ -15,7 +15,7 @@ import pytest
 
 from triceratops.config.config import Config
 from triceratops.domain.entities import LightCurve
-from triceratops.domain.value_objects import LimbDarkeningCoeffs, StellarParameters
+from triceratops.domain.value_objects import StellarParameters
 from triceratops.limb_darkening.catalog import FixedLDCCatalog
 from triceratops.scenarios.kernels import pack_best_indices
 
@@ -169,7 +169,7 @@ class TestPTPConsistency:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array):
+        def capture_lnZ(score_array, *_args):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -222,7 +222,7 @@ class TestPTPDivergence:
         pack_args: list[np.ndarray] = []
         lnL_raw: list[np.ndarray] = []
 
-        def capture_lnZ(score_array):
+        def capture_lnZ(score_array, *_args):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -266,9 +266,11 @@ class TestPTPDivergence:
         # Verify divergence: top-5 by lnL != top-5 by lnL + lnprior_comp
         # (only meaningful if the prior is non-flat, which it will be for companion scenarios)
         finite_mask = np.isfinite(lnZ_score) & np.isfinite(lnL)
-        if np.any(finite_mask) and not np.allclose(lnprior_comp_actual[finite_mask], lnprior_comp_actual[finite_mask][0]):
+        if np.any(finite_mask) and not np.allclose(
+            lnprior_comp_actual[finite_mask],
+            lnprior_comp_actual[finite_mask][0],
+        ):
             n_best = 5
-            top_by_lnL = set(np.argsort(-lnL[finite_mask])[:n_best].tolist())
             top_by_posterior = set(np.argsort(-lnZ_score[finite_mask])[:n_best].tolist())
             # This shows the prior actually matters — if top-k changed, the fix is
             # selecting different (more posterior-correct) samples
@@ -295,7 +297,7 @@ class TestPEBTwinBranch:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array):
+        def capture_lnZ(score_array, *_args):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -348,7 +350,7 @@ class TestSEBTwinBranch:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array):
+        def capture_lnZ(score_array, *_args):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -400,7 +402,7 @@ class TestFlatPriorEdgeCase:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array):
+        def capture_lnZ(score_array, *_args):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
@@ -465,7 +467,7 @@ class TestSTPConsistency:
         lnZ_args: list[np.ndarray] = []
         pack_args: list[np.ndarray] = []
 
-        def capture_lnZ(score_array):
+        def capture_lnZ(score_array, *_args):
             lnZ_args.append(score_array.copy())
             return float(-np.inf)
 
