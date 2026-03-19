@@ -69,6 +69,16 @@ This implementation reproduces the original TRICERATOPS results with four
 documented bug fixes in the underlying numerics. All corrections are
 verified by deterministic golden regression tests at fixed random seeds.
 
+The runtime config also supports two numerical modes:
+
+- `numerical_mode="corrected"`: the default scientific mode; keeps the
+  documented numerical fixes enabled
+- `numerical_mode="legacy"`: an internal compatibility mode for parity
+  investigations against vendor `TRICERATOPS+`
+
+`legacy` is intended for parity validation and migration checks, not normal
+forward use. `corrected` remains the default mode for new computations.
+
 See [PARITY.md](PARITY.md) for the full numerical changes log with
 formulas, affected scenarios, and before/after comparisons.
 
