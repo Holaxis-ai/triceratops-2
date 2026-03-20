@@ -96,6 +96,22 @@ class MASTCatalogProvider:
         ]
         stars_df = df[cols].to_pandas()
 
+        # MAST can return duplicate-coordinate rows where the requested TIC is not
+        # first in the table. Reorder explicitly so the exact resolved TIC becomes
+        # the target row used for separations and StellarField.target.
+        target_mask = stars_df["ID"].astype(int) == int(resolved_id)
+        if target_mask.any():
+            target_rows = stars_df[target_mask]
+            other_rows = stars_df[~target_mask]
+            stars_df = target_rows.reset_index(drop=True)
+            if not other_rows.empty:
+                import pandas as pd
+
+                stars_df = pd.concat(
+                    [stars_df, other_rows.reset_index(drop=True)],
+                    ignore_index=True,
+                )
+
         # Compute separations and position angles
         target_coord = SkyCoord(
             stars_df["ra"].values[0],
@@ -142,7 +158,7 @@ class MASTCatalogProvider:
             ))
 
         return StellarField(
-            target_id=tic_id,
+            target_id=int(stars_df["ID"].values[0]),
             mission=mission,
             search_radius_pixels=search_radius_px,
             stars=star_list,
