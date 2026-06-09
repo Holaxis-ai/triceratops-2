@@ -1,7 +1,7 @@
 """Background star scenario implementations (D- and B-scenarios).
 
-DTP/DEB: Diluted background star (target star dilutes signal).
-BTP/BEB: Bright background star (background star is transit host).
+DTP/DEB: Signal is on the TARGET, diluted by an unresolved (faint) background star.
+BTP/BEB: Signal is on the unresolved background star (it is the transit/eclipse host).
 
 Source: marginal_likelihoods.py:2058-2380 (lnZ_DTP), 2382-2820 (lnZ_DEB),
         2823-3155 (lnZ_BTP), 3158-3669 (lnZ_BEB).
@@ -71,10 +71,12 @@ _ln2pi = LN2PI
 
 
 class DTPScenario(BaseScenario):
-    """Planet on a Diluted Background star.
+    """Planet on the TARGET star, diluted by an unresolved background star.
 
-    The background star's properties come from TRILEGAL simulation.
-    The target star dilutes the signal. BUG-04 is fixed here.
+    The transit is modeled on the target (target mass + limb darkening); an
+    unresolved background star (properties from the TRILEGAL simulation) adds
+    flux and dilutes the transit depth. DTP is a genuine-planet scenario -- it is
+    in the FPP planet numerator (FPP = 1 - TP - PTP - DTP). BUG-04 is fixed here.
 
     Source: marginal_likelihoods.py:2058-2380
     """
@@ -91,7 +93,7 @@ class DTPScenario(BaseScenario):
         self, stellar_params: StellarParameters, mission: str,
         P_orb: np.ndarray, kwargs: dict,
     ) -> LimbDarkeningCoeffs:
-        """Target star LDC (DTP: target dilutes the background signal).
+        """Target star LDC (DTP: planet on the target; a background star dilutes the signal).
 
         Source: marginal_likelihoods.py:2117-2138
         """
@@ -181,7 +183,7 @@ class DTPScenario(BaseScenario):
         self, samples: dict[str, np.ndarray], P_orb: np.ndarray,
         stellar_params: StellarParameters, config: Config, **kwargs: object,
     ) -> dict[str, np.ndarray]:
-        """DTP orbital geometry -- uses target star mass only (planet on background).
+        """DTP orbital geometry -- uses target star mass only (planet is on the target).
 
         Source: marginal_likelihoods.py:2280-2290
         Note: original uses a = ((G*M_s*Msun)/(4*pi**2)*(P_orb*86400)**2)**(1/3)
@@ -358,7 +360,7 @@ class DTPScenario(BaseScenario):
 
 
 class DEBScenario(BaseScenario):
-    """Eclipsing Binary on a Diluted Background star.
+    """Eclipsing binary on the TARGET, diluted by an unresolved background star.
 
     Returns (result, result_twin) -- twin is the q>=0.95 half-period alias.
 
