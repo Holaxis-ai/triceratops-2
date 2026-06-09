@@ -15,6 +15,7 @@ from triceratops.limb_darkening.catalog import FixedLDCCatalog
 from triceratops.scenarios.companion_scenarios import (
     PEBScenario,
     PTPScenario,
+    _companion_flux_filter,
     _compute_companion_prior,
     _compute_companion_properties,
     _load_molusc_qs,
@@ -31,6 +32,12 @@ _skip_no_pytransit = pytest.mark.skipif(
 )
 
 _LNL_MOD = "triceratops.scenarios.companion_scenarios"
+
+
+def test_companion_flux_filter_defaults_none_to_tess():
+    assert _companion_flux_filter({}) == "TESS"
+    assert _companion_flux_filter({"filt": None}) == "TESS"
+    assert _companion_flux_filter({"filt": "K"}) == "K"
 
 
 class _RecordingCatalog:

@@ -165,6 +165,22 @@ ContrastCurveInput = ContrastCurve | ContrastCurveSet | Iterable[ContrastCurve] 
 """Accepted contrast-curve input at validation/scenario boundaries."""
 
 
+def canonicalize_contrast_curve_input(
+    contrast_curve: ContrastCurveInput,
+) -> ContrastCurve | ContrastCurveSet | None:
+    """Return a reusable, picklable contrast-curve input object.
+
+    Concrete inputs are preserved.  Generic iterables are materialized once so
+    one-shot iterators cannot be consumed by helper introspection before the
+    scenario worker sees them.
+    """
+    if contrast_curve is None:
+        return None
+    if isinstance(contrast_curve, (ContrastCurve, ContrastCurveSet)):
+        return contrast_curve
+    return ContrastCurveSet(contrast_curve)
+
+
 def normalize_contrast_curves(
     contrast_curve: ContrastCurveInput,
 ) -> tuple[ContrastCurve, ...]:

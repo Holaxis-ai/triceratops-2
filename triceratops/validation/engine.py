@@ -32,6 +32,7 @@ from triceratops.domain.value_objects import (
     ContrastCurveInput,
     PeriodSpec,
     StellarParameters,
+    canonicalize_contrast_curve_input,
     normalize_contrast_curves,
 )
 from triceratops.population.protocols import TRILEGALResult
@@ -257,6 +258,7 @@ class ValidationEngine:
         """
         if config.seed is not None:
             np.random.seed(config.seed)
+        contrast_curve = canonicalize_contrast_curve_input(contrast_curve)
 
         nearby_ids = ScenarioID.nearby_scenarios()
         if scenario_ids is None:

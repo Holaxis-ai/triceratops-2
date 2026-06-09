@@ -199,6 +199,27 @@ class TestPreparedValidationInputsConstruction:
         )
         assert pvi.contrast_curve is curve_set
 
+    def test_contrast_curve_generator_is_materialized(
+        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
+    ) -> None:
+        """One-shot iterables are stable before compute or pickle boundaries."""
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0, 5.0]),
+            delta_mags=np.array([0.0, 3.0, 6.0]),
+            band="K",
+        )
+        pvi = PreparedValidationInputs(
+            target_id=1,
+            stellar_field=stellar_field,
+            light_curve=lc,
+            config=cfg,
+            period_days=10.0,
+            contrast_curve=(curve for curve in [curve]),
+        )
+
+        assert isinstance(pvi.contrast_curve, ContrastCurveSet)
+        assert tuple(pvi.contrast_curve) == (curve,)
+
     def test_with_molusc_data(
         self, stellar_field: StellarField, lc: LightCurve, cfg: Config
     ) -> None:

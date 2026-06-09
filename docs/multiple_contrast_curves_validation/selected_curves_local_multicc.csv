@@ -1,0 +1,4 @@
+target,slug,band,basename,telescope,obs_filter,sep_at_dmag_3,dmag_at_0.5,dmag_max,iwa_arcsec,owa_arcsec
+TOI-6067.01,toi-6067-01,Vis,TOI6067I-cc20240525-562_sensitivity.dat,Gemini (8 m),562: 562 (54) nm,0.06999042189201778,5.515095,5.943272,0.01,1.17
+TOI-6067.01,toi-6067-01,H,TOI6067I-dc20240727-Hcont_plot.tbl,Palomar (5 m),Hcont,0.19766842105263158,6.713709302325581,9.556,0.095,9.894
+TOI-6067.01,toi-6067-01,K,TOI6067I-dc20240727-Kcont_plot.tbl,Palomar (5 m),Kcont,0.18286923076923076,6.7293939393939395,8.741,0.109,9.9

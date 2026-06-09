@@ -11,6 +11,7 @@ from triceratops.domain.value_objects import (
     ContrastCurveSet,
     LimbDarkeningCoeffs,
     StellarParameters,
+    canonicalize_contrast_curve_input,
     normalize_contrast_curves,
 )
 
@@ -122,6 +123,30 @@ class TestContrastCurveSet:
     def test_normalize_contrast_curves_rejects_non_curves(self) -> None:
         with pytest.raises(TypeError, match="ContrastCurve instances"):
             normalize_contrast_curves(["not a curve"])  # type: ignore[list-item]
+
+    def test_canonicalize_preserves_concrete_inputs(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="TESS",
+        )
+        curve_set = ContrastCurveSet([curve])
+
+        assert canonicalize_contrast_curve_input(None) is None
+        assert canonicalize_contrast_curve_input(curve) is curve
+        assert canonicalize_contrast_curve_input(curve_set) is curve_set
+
+    def test_canonicalize_materializes_one_shot_iterable(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="K",
+        )
+
+        canonical = canonicalize_contrast_curve_input(curve for curve in [curve])
+
+        assert isinstance(canonical, ContrastCurveSet)
+        assert normalize_contrast_curves(canonical) == (curve,)
 
 
 class TestLimbDarkeningCoeffs:

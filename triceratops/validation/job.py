@@ -93,6 +93,11 @@ class PreparedValidationInputs:
     molusc_data: MoluscData | None = None
     scenario_ids: Sequence[ScenarioID] | None = None  # None → run full default registry
 
+    def __post_init__(self) -> None:
+        from triceratops.domain.value_objects import canonicalize_contrast_curve_input
+
+        self.contrast_curve = canonicalize_contrast_curve_input(self.contrast_curve)
+
     def validate(self) -> None:
         """Preflight validation: assert all scientific preconditions are met.
 
