@@ -117,6 +117,11 @@ class TestContrastCurveSet:
         assert normalize_contrast_curves(None) == ()
         assert normalize_contrast_curves(curve) == (curve,)
         assert normalize_contrast_curves(curve_set) == (curve,)
+        assert normalize_contrast_curves([curve]) == (curve,)
+
+    def test_normalize_contrast_curves_rejects_non_curves(self) -> None:
+        with pytest.raises(TypeError, match="ContrastCurve instances"):
+            normalize_contrast_curves(["not a curve"])  # type: ignore[list-item]
 
 
 class TestLimbDarkeningCoeffs:

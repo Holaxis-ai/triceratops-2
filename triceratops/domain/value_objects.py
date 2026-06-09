@@ -161,7 +161,7 @@ class ContrastCurveSet:
         return tuple(curve.band for curve in self.curves)
 
 
-ContrastCurveInput = ContrastCurve | ContrastCurveSet | None
+ContrastCurveInput = ContrastCurve | ContrastCurveSet | Iterable[ContrastCurve] | None
 """Accepted contrast-curve input at validation/scenario boundaries."""
 
 
@@ -173,4 +173,6 @@ def normalize_contrast_curves(
         return ()
     if isinstance(contrast_curve, ContrastCurve):
         return (contrast_curve,)
-    return contrast_curve.curves
+    if isinstance(contrast_curve, ContrastCurveSet):
+        return contrast_curve.curves
+    return ContrastCurveSet(contrast_curve).curves
