@@ -403,6 +403,81 @@ def test_compute_companion_prior_with_contrast_curve():
     assert prior.shape == (n,)
 
 
+def test_compute_companion_prior_curve_set_single_matches_single_curve():
+    """A one-curve set preserves the previous single-curve prior."""
+    from triceratops.domain.value_objects import ContrastCurve, ContrastCurveSet
+
+    cc = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    from triceratops.stellar.relations import StellarRelations
+    sr = StellarRelations()
+    flux_comp = sr.get_flux_ratio(masses, "TESS")
+    flux_primary = sr.get_flux_ratio(np.array([1.0]), "TESS")
+    fluxratios = flux_comp / (flux_comp + flux_primary)
+
+    single = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=cc, filt="TESS", is_eb=False,
+    )
+    as_set = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([cc]), filt="TESS", is_eb=False,
+    )
+
+    np.testing.assert_array_equal(as_set, single)
+
+
+def test_compute_companion_prior_curve_set_uses_tightest_curve_per_draw():
+    """Multiple curves combine by the smallest allowed separation per draw."""
+    from triceratops.domain.value_objects import ContrastCurve, ContrastCurveSet
+
+    loose = ContrastCurve(
+        separations_arcsec=np.array([0.2, 1.0, 2.0, 4.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    tight = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    from triceratops.stellar.relations import StellarRelations
+    sr = StellarRelations()
+    flux_comp = sr.get_flux_ratio(masses, "TESS")
+    flux_primary = sr.get_flux_ratio(np.array([1.0]), "TESS")
+    fluxratios = flux_comp / (flux_comp + flux_primary)
+
+    expected = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=tight, filt="TESS", is_eb=False,
+    )
+    multi = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([loose, tight]), filt="TESS", is_eb=False,
+    )
+
+    np.testing.assert_array_equal(multi, expected)
+
+
 # --- Phase-level tests (no pytransit needed) ---
 
 def test_ptp_sample_priors(fixed_ldc, stellar_params, small_config):

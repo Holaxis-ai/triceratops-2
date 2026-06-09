@@ -11,11 +11,14 @@ from triceratops.config.config import Config
 from triceratops.domain.entities import LightCurve, Star, StellarField
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import ContrastCurve, StellarParameters
+from triceratops.domain.value_objects import (
+    ContrastCurve,
+    ContrastCurveSet,
+    StellarParameters,
+)
 from triceratops.scenarios.registry import ScenarioRegistry
 from triceratops.validation.engine import ValidationEngine
 from triceratops.validation.job import PreparedValidationInputs, PreparedValidationMetadata
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures shared with test_engine.py (minimal copies to avoid coupling)
@@ -169,6 +172,32 @@ class TestPreparedValidationInputsConstruction:
             contrast_curve=cc,
         )
         assert pvi.contrast_curve is cc
+
+    def test_with_contrast_curve_set(
+        self, stellar_field: StellarField, lc: LightCurve, cfg: Config
+    ) -> None:
+        """Can construct with multiple ContrastCurves."""
+        curve_set = ContrastCurveSet([
+            ContrastCurve(
+                separations_arcsec=np.array([0.1, 1.0, 5.0]),
+                delta_mags=np.array([0.0, 3.0, 6.0]),
+                band="Vis",
+            ),
+            ContrastCurve(
+                separations_arcsec=np.array([0.05, 0.5, 2.5]),
+                delta_mags=np.array([0.0, 4.0, 8.0]),
+                band="K",
+            ),
+        ])
+        pvi = PreparedValidationInputs(
+            target_id=1,
+            stellar_field=stellar_field,
+            light_curve=lc,
+            config=cfg,
+            period_days=10.0,
+            contrast_curve=curve_set,
+        )
+        assert pvi.contrast_curve is curve_set
 
     def test_with_molusc_data(
         self, stellar_field: StellarField, lc: LightCurve, cfg: Config
@@ -448,7 +477,6 @@ class TestComputePreparedScenarioIdsGuard:
         """
         from triceratops.scenarios.registry import ScenarioRegistry
         from triceratops.validation.engine import ValidationEngine
-        from triceratops.validation.errors import ValidationError
         from triceratops.validation.job import PreparedValidationInputs
 
         engine = ValidationEngine(registry=ScenarioRegistry())  # empty — no TRILEGAL
@@ -481,7 +509,8 @@ class TestPrepareComputeScenarioContract:
         self, lc: LightCurve, cfg: Config
     ) -> None:
         """compute_prepared() must call _compute(scenario_ids=prepared.scenario_ids), not None."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
+
         from triceratops.domain.scenario_id import ScenarioID
         from triceratops.domain.value_objects import StellarParameters
         from triceratops.validation.engine import ValidationEngine

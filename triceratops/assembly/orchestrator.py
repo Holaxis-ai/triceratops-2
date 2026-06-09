@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from triceratops.assembly.config import AssemblyConfig
-from triceratops.assembly.errors import AssemblyConfigError, AssemblyError, AssemblyLightCurveError
+from triceratops.assembly.errors import AssemblyConfigError, AssemblyLightCurveError
 from triceratops.assembly.inputs import AssembledInputs, AssemblyMetadata
 from triceratops.domain.scenario_id import ScenarioID
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
@@ -18,8 +18,8 @@ if TYPE_CHECKING:
         ArtifactStore,
         ContrastCurveSource,
         ExternalLcSource,
-        MoluscSource,
         LightCurveSource,
+        MoluscSource,
     )
     from triceratops.catalog.protocols import ApertureProvider, StarCatalogProvider
     from triceratops.domain.entities import (
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
         StellarField,
     )
     from triceratops.domain.molusc import MoluscData
-    from triceratops.domain.value_objects import ContrastCurve
+    from triceratops.domain.value_objects import ContrastCurve, ContrastCurveInput
     from triceratops.lightcurve.ephemeris import EphemerisResolver, ResolvedTarget
     from triceratops.population.protocols import PopulationSynthesisProvider, TRILEGALResult
 
@@ -152,7 +152,7 @@ class DataAssemblyOrchestrator:
             )
 
         # Step 3: Contrast curve
-        contrast_curve: ContrastCurve | None = None
+        contrast_curve: ContrastCurveInput = None
         if config.include_contrast_curve and self._contrast is not None:
             contrast_curve, cc_warnings = self._assemble_contrast_curve(config)
             all_warnings.extend(cc_warnings)

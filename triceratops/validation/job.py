@@ -26,11 +26,10 @@ See: working_docs/iteration/priority-3_pure-compute-boundary.md
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
-
-from collections.abc import Sequence
 
 from triceratops.domain.value_objects import PeriodSpec
 
@@ -39,7 +38,7 @@ if TYPE_CHECKING:
     from triceratops.domain.entities import ExternalLightCurve, LightCurve, StellarField
     from triceratops.domain.molusc import MoluscData
     from triceratops.domain.scenario_id import ScenarioID
-    from triceratops.domain.value_objects import ContrastCurve
+    from triceratops.domain.value_objects import ContrastCurveInput
     from triceratops.population.protocols import TRILEGALResult
 
 
@@ -90,7 +89,7 @@ class PreparedValidationInputs:
     period_days: PeriodSpec
     trilegal_population: TRILEGALResult | None = None
     external_lcs: list[ExternalLightCurve] | None = None
-    contrast_curve: ContrastCurve | None = None
+    contrast_curve: ContrastCurveInput = None
     molusc_data: MoluscData | None = None
     scenario_ids: Sequence[ScenarioID] | None = None  # None → run full default registry
 

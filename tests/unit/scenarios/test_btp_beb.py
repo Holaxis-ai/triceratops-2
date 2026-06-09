@@ -10,9 +10,15 @@ from triceratops.config.config import Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve
 from triceratops.domain.result import ScenarioResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import LimbDarkeningCoeffs, StellarParameters
+from triceratops.domain.value_objects import (
+    ContrastCurve,
+    ContrastCurveSet,
+    LimbDarkeningCoeffs,
+    StellarParameters,
+)
 from triceratops.limb_darkening.catalog import FixedLDCCatalog
 from triceratops.population.protocols import TRILEGALResult
+from triceratops.priors.lnpriors import lnprior_background
 from triceratops.priors.sampling import (
     sample_arg_periastron,
     sample_companion_mass_ratio,
@@ -314,6 +320,45 @@ class TestBrightBackgroundParity:
         expected[delta_mags > 0.0] = -np.inf
 
         np.testing.assert_array_equal(lnprior, expected)
+
+    def test_beb_prior_curve_set_uses_tightest_curve_per_draw(self) -> None:
+        idxs = np.array([0, 1])
+        fluxratios_comp = np.array([0.10, 0.15])
+        fluxratios_eb = np.array([0.05, 0.10])
+        loose = ContrastCurve(
+            separations_arcsec=np.array([0.2, 1.0, 2.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        tight = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+
+        lnprior = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            fluxratios_comp,
+            fluxratios_eb,
+            ContrastCurveSet([loose, tight]),
+            band_fluxratio_resolver=lambda _band: (fluxratios_comp, fluxratios_eb),
+        )
+
+        delta_mags = 2.5 * np.log10(
+            (fluxratios_comp / (1 - fluxratios_comp))
+            + (fluxratios_eb / (1 - fluxratios_eb))
+        )
+        expected = lnprior_background(
+            50,
+            np.abs(delta_mags),
+            tight.separations_arcsec,
+            tight.delta_mags,
+        )
+        expected[expected > 0.0] = 0.0
+        expected[delta_mags > 0.0] = -np.inf
+
+        np.testing.assert_allclose(lnprior, expected)
 
     def test_lookup_background_ldc_bulk_uses_slice_then_metallicity(self) -> None:
         class SparseCatalog:

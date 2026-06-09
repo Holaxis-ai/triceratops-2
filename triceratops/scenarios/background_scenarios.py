@@ -51,6 +51,7 @@ from triceratops.scenarios._background_helpers import (
     _compute_fluxratios_comp,
     _compute_lnprior_companion,
     _compute_sdss_delta_mags,
+    _delta_mags_for_band,
     _filter_population_by_target_tmag,
     _lookup_background_ldc_bulk,
     _relations,
@@ -120,9 +121,10 @@ class DTPScenario(BaseScenario):
 
         host_mags: dict = kwargs.get("host_magnitudes", {})  # type: ignore[assignment]
         filt: str | None = kwargs.get("filt")  # type: ignore[assignment]
+        contrast_curve = kwargs.get("contrast_curve")
         external_lc_bands = tuple(kwargs.get("external_lc_bands", ()))  # type: ignore[arg-type]
         gmag, rmag, imag, zmag = _resolve_sdss_target_mags(
-            host_mags, external_lc_bands, filt,
+            host_mags, external_lc_bands, filt, contrast_curve,
         )
 
         # Compute delta mags and flux ratios (BUG-04 fix via _compute_delta_mags_map)
@@ -143,7 +145,6 @@ class DTPScenario(BaseScenario):
         fluxratios_comp = _compute_fluxratios_comp(delta_mags_tess)
 
         # Companion prior
-        contrast_curve = kwargs.get("contrast_curve")
         lnprior = _compute_lnprior_companion(
             n_comp,
             fluxratios_comp,
@@ -401,9 +402,10 @@ class DEBScenario(BaseScenario):
 
         host_mags: dict = kwargs.get("host_magnitudes", {})  # type: ignore[assignment]
         filt: str | None = kwargs.get("filt")  # type: ignore[assignment]
+        contrast_curve = kwargs.get("contrast_curve")
         external_lc_bands = tuple(kwargs.get("external_lc_bands", ()))  # type: ignore[arg-type]
         gmag, rmag, imag, zmag = _resolve_sdss_target_mags(
-            host_mags, external_lc_bands, filt,
+            host_mags, external_lc_bands, filt, contrast_curve,
         )
 
         # Match the original RNG stream: sample EB priors before drawing
@@ -434,7 +436,6 @@ class DEBScenario(BaseScenario):
         idxs = _sample_population_indices(n_comp, n, legacy_exclude_last=True)
 
         # Companion prior (same as DTP)
-        contrast_curve = kwargs.get("contrast_curve")
         lnprior = _compute_lnprior_companion(
             n_comp,
             fluxratios_comp,
@@ -769,9 +770,10 @@ class BTPScenario(BaseScenario):
 
         host_mags: dict = kwargs.get("host_magnitudes", {})  # type: ignore[assignment]
         filt: str | None = kwargs.get("filt")  # type: ignore[assignment]
+        contrast_curve = kwargs.get("contrast_curve")
         external_lc_bands = tuple(kwargs.get("external_lc_bands", ()))  # type: ignore[arg-type]
         gmag, rmag, imag, zmag = _resolve_sdss_target_mags(
-            host_mags, external_lc_bands, filt,
+            host_mags, external_lc_bands, filt, contrast_curve,
         )
 
         delta_mags_map = _compute_delta_mags_map(
@@ -791,7 +793,6 @@ class BTPScenario(BaseScenario):
         fluxratios_comp = _compute_fluxratios_comp(delta_mags_tess)
 
         # Background prior
-        contrast_curve = kwargs.get("contrast_curve")
         lnprior = _compute_lnprior_companion(
             n_comp,
             fluxratios_comp,
@@ -1096,9 +1097,10 @@ class BEBScenario(BaseScenario):
 
         host_mags: dict = kwargs.get("host_magnitudes", {})  # type: ignore[assignment]
         filt: str | None = kwargs.get("filt")  # type: ignore[assignment]
+        contrast_curve = kwargs.get("contrast_curve")
         external_lc_bands = tuple(kwargs.get("external_lc_bands", ()))  # type: ignore[arg-type]
         gmag, rmag, imag, zmag = _resolve_sdss_target_mags(
-            host_mags, external_lc_bands, filt,
+            host_mags, external_lc_bands, filt, contrast_curve,
         )
 
         # Match the original RNG stream. The unused companion-q draw is kept
@@ -1142,7 +1144,6 @@ class BEBScenario(BaseScenario):
             )
         )
 
-        contrast_curve = kwargs.get("contrast_curve")
         if filt is not None:
             filt_key = f"delta_{filt}mags"
             if filt_key in delta_mags_map:
@@ -1163,6 +1164,24 @@ class BEBScenario(BaseScenario):
         else:
             fluxratios_comp_band = fluxratios_comp[idxs]
             fluxratios_band = fluxratios
+
+        def resolve_beb_band_fluxratios(
+            band: str,
+        ) -> tuple[np.ndarray, np.ndarray]:
+            comp_fr_band = _compute_fluxratios_comp(
+                _delta_mags_for_band(delta_mags_map, band),
+            )[idxs]
+            _distance_correction_band, eb_fr_band = (
+                self._beb_distance_corrected_eb_fluxratios(
+                    masses,
+                    population.masses[idxs],
+                    comp_fr_band,
+                    stellar_params.mass_msun,
+                    band=band,
+                )
+            )
+            return comp_fr_band, eb_fr_band
+
         lnprior = _compute_bright_background_lnprior(
             n_comp,
             idxs,
@@ -1170,6 +1189,7 @@ class BEBScenario(BaseScenario):
             fluxratios_band,
             contrast_curve,
             config.numerical_mode,
+            band_fluxratio_resolver=resolve_beb_band_fluxratios,
         )
 
         return {

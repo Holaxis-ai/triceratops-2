@@ -12,7 +12,7 @@ import numpy as np
 from triceratops.config.config import CONST
 
 
-def _separation_at_contrast(
+def separation_at_contrast(
     delta_mags: np.ndarray,
     separations: np.ndarray,
     contrasts: np.ndarray,
@@ -22,6 +22,15 @@ def _separation_at_contrast(
     Port of funcs.py:277-293 (separation_at_contrast).
     """
     return np.interp(delta_mags, contrasts, separations)
+
+
+def _separation_at_contrast(
+    delta_mags: np.ndarray,
+    separations: np.ndarray,
+    contrasts: np.ndarray,
+) -> np.ndarray:
+    """Backward-compatible private alias for separation interpolation."""
+    return separation_at_contrast(delta_mags, separations, contrasts)
 
 
 def lnprior_host_mass_planet(mass_msun: np.ndarray) -> float:
@@ -146,37 +155,31 @@ def lnprior_period_binary(period_days: float) -> float:
     return float(np.log(prob))
 
 
-def _compute_companion_rate(
-    primary_mass: float,
+def lnprior_bound_companion_from_separations(
+    primary_mass_msun: float,
     parallax_mas: float,
-    delta_mags: np.ndarray,
-    separations: np.ndarray,
-    contrasts: np.ndarray,
-    include_short_period: bool,
+    separations_arcsec: np.ndarray,
+    is_eb: bool = False,
 ) -> np.ndarray:
-    """Shared computation for bound companion priors (TP and EB).
+    """Log prior for a bound companion from per-draw allowed separations.
 
     Args:
-        primary_mass: Target star mass in solar masses.
+        primary_mass_msun: Target star mass in solar masses.
         parallax_mas: Parallax in milliarcseconds.
-        delta_mags: Contrasts of simulated companions.
-        separations: Contrast curve separations (arcsec).
-        contrasts: Contrast curve delta-mag limits.
-        include_short_period: If True, include contributions from short-period
-            companions (EB scenarios). If False, set them to zero (TP scenarios).
+        separations_arcsec: Maximum angular separation allowed for each draw.
+        is_eb: If True, include contributions from short-period companions.
 
     Returns:
         Array of log-prior values.
-
-    Source: priors.py:580-984 (lnprior_bound_TP and lnprior_bound_EB)
     """
     pi = np.pi
 
+    primary_mass = primary_mass_msun
     plx = parallax_mas
     if np.isnan(plx):
         plx = 0.1
     d = 1000 / plx
-    seps = d * _separation_at_contrast(delta_mags, separations, contrasts)
+    seps = d * np.asarray(separations_arcsec, dtype=float)
 
     if primary_mass >= 1.0:
         M_s = primary_mass
@@ -221,7 +224,7 @@ def _compute_companion_rate(
         f_comp = np.zeros(len(seps))
         logP = np.log10(max_Porbs)
 
-        if include_short_period:
+        if is_eb:
             # EB: include short-period contributions
             f_comp[logP < 1.0] = 0.0
             mask = (logP >= 1.0) & (logP < 2.0)
@@ -291,7 +294,7 @@ def _compute_companion_rate(
         f_comp = np.zeros(len(seps))
         logP = np.log10(max_Porbs)
 
-        if include_short_period:
+        if is_eb:
             f_comp[logP < 1.0] = 0.0
             mask = (logP >= 1.0) & (logP < 2.0)
             f_comp[mask] = t2_partial[mask]
@@ -316,6 +319,24 @@ def _compute_companion_rate(
         f_act[f_act < 0.0] = 0.0
         with np.errstate(divide='ignore', invalid='ignore'):
             return np.log(f_act)
+
+
+def _compute_companion_rate(
+    primary_mass: float,
+    parallax_mas: float,
+    delta_mags: np.ndarray,
+    separations: np.ndarray,
+    contrasts: np.ndarray,
+    include_short_period: bool,
+) -> np.ndarray:
+    """Backward-compatible wrapper for tests and private callers."""
+    allowed_separations = separation_at_contrast(delta_mags, separations, contrasts)
+    return lnprior_bound_companion_from_separations(
+        primary_mass_msun=primary_mass,
+        parallax_mas=parallax_mas,
+        separations_arcsec=allowed_separations,
+        is_eb=include_short_period,
+    )
 
 
 def lnprior_bound_companion(
@@ -344,14 +365,31 @@ def lnprior_bound_companion(
     if separations_arcsec is None or contrasts is None:
         return np.zeros(len(delta_mags))
 
-    return _compute_companion_rate(
-        primary_mass=primary_mass_msun,
+    separations = separation_at_contrast(delta_mags, separations_arcsec, contrasts)
+    return lnprior_bound_companion_from_separations(
+        primary_mass_msun=primary_mass_msun,
         parallax_mas=parallax_mas,
-        delta_mags=delta_mags,
-        separations=separations_arcsec,
-        contrasts=contrasts,
-        include_short_period=is_eb,
+        separations_arcsec=separations,
+        is_eb=is_eb,
     )
+
+
+def lnprior_background_from_separations(
+    n_comp: int,
+    separations_arcsec: np.ndarray,
+    numerical_mode: str = "corrected",
+) -> np.ndarray:
+    """Log prior for a background star from per-draw allowed separations."""
+    with np.errstate(divide='ignore', invalid='ignore'):
+        base = (n_comp / 0.1) * (1 / 3600) ** 2 * separations_arcsec**2
+        if numerical_mode == "legacy":
+            return np.log10(base)
+        if numerical_mode != "corrected":
+            raise ValueError(
+                "numerical_mode must be 'corrected' or 'legacy', "
+                f"got {numerical_mode!r}"
+            )
+        return np.log(base)
 
 
 def lnprior_background(
@@ -374,14 +412,9 @@ def lnprior_background(
     Returns:
         Array of log-prior values, shape (N,).
     """
-    seps = _separation_at_contrast(delta_mags, separations_arcsec, contrasts)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        base = (n_comp / 0.1) * (1 / 3600) ** 2 * seps**2
-        if numerical_mode == "legacy":
-            return np.log10(base)
-        if numerical_mode != "corrected":
-            raise ValueError(
-                "numerical_mode must be 'corrected' or 'legacy', "
-                f"got {numerical_mode!r}"
-            )
-        return np.log(base)
+    seps = separation_at_contrast(delta_mags, separations_arcsec, contrasts)
+    return lnprior_background_from_separations(
+        n_comp,
+        seps,
+        numerical_mode=numerical_mode,
+    )

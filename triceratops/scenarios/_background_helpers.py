@@ -6,15 +6,22 @@ BEBScenario but are not tightly bound to any one class.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 
+from triceratops.domain.value_objects import normalize_contrast_curves
 from triceratops.population.protocols import TRILEGALResult
-from triceratops.priors.lnpriors import lnprior_background
+from triceratops.priors.lnpriors import (
+    lnprior_background,
+    lnprior_background_from_separations,
+    separation_at_contrast,
+)
 from triceratops.scenarios.constants import (
     ARCSEC_TO_DEG,
     COMPANION_DEFAULT_SEP_ARCSEC,
 )
-from triceratops.stellar.relations import StellarRelations
+from triceratops.stellar.relations import StellarRelations, canonicalize_filter_name
 
 _relations = StellarRelations()
 _SDSS_BANDS = frozenset({"g", "r", "i", "z"})
@@ -55,12 +62,16 @@ def _filter_population_by_target_tmag(
 
 
 def _needs_sdss_delta_mags(
-    external_lc_bands: tuple[str, ...], filt: str | None,
+    external_lc_bands: tuple[str, ...],
+    filt: str | None,
+    contrast_curve: object | None = None,
 ) -> bool:
     """Return True when any active band requires SDSS photometry."""
-    bands = set(external_lc_bands)
+    bands = {canonicalize_filter_name(band) for band in external_lc_bands}
     if filt is not None:
-        bands.add(filt)
+        bands.add(canonicalize_filter_name(filt))
+    for curve in normalize_contrast_curves(contrast_curve):
+        bands.add(canonicalize_filter_name(curve.band))
     return any(band in _SDSS_BANDS for band in bands)
 
 
@@ -68,6 +79,7 @@ def _resolve_sdss_target_mags(
     host_mags: dict[str, float | None],
     external_lc_bands: tuple[str, ...],
     filt: str | None,
+    contrast_curve: object | None = None,
 ) -> tuple[float | None, float | None, float | None, float | None]:
     """Resolve target g/r/i/z, estimating them when the original code did."""
     gmag = host_mags.get("gmag")
@@ -78,7 +90,9 @@ def _resolve_sdss_target_mags(
     no_sdss = all(
         mag is None or np.isnan(mag) for mag in (gmag, rmag, imag, zmag)
     )
-    if no_sdss and _needs_sdss_delta_mags(external_lc_bands, filt):
+    if no_sdss and _needs_sdss_delta_mags(
+        external_lc_bands, filt, contrast_curve,
+    ):
         bmag = host_mags.get("bmag")
         vmag = host_mags.get("vmag")
         jmag = host_mags.get("jmag")
@@ -162,6 +176,43 @@ def _combined_delta_mag(
     )
 
 
+def _delta_mag_key_for_band(band: str | None) -> str:
+    """Map a curve/filter band to the available TRILEGAL delta-mag array."""
+    canonical = canonicalize_filter_name(band or "TESS")
+    filt_key_map = {
+        "TESS": "delta_TESSmags",
+        "Vis": "delta_TESSmags",
+        "Kepler": "delta_TESSmags",
+        "J": "delta_Jmags",
+        "H": "delta_Hmags",
+        "K": "delta_Kmags",
+        "g": "delta_gmags",
+        "r": "delta_rmags",
+        "i": "delta_imags",
+        "z": "delta_zmags",
+    }
+    if canonical not in filt_key_map:
+        raise ValueError(
+            f"Unsupported contrast curve band {band!r}; expected one of "
+            "TESS, Vis, Kepler, J, H, K, g, r, i, z or a supported alias."
+        )
+    return filt_key_map[canonical]
+
+
+def _delta_mags_for_band(
+    delta_mags_map: dict[str, np.ndarray],
+    band: str | None,
+) -> np.ndarray:
+    """Return delta magnitudes for a curve band, failing clearly if absent."""
+    key = _delta_mag_key_for_band(band)
+    if key not in delta_mags_map:
+        raise ValueError(
+            f"Contrast curve band {band!r} requires {key}, but those "
+            "target/population magnitudes were not available."
+        )
+    return delta_mags_map[key]
+
+
 def _compute_lnprior_companion(
     n_comp: int,
     fluxratios_comp: np.ndarray,
@@ -184,7 +235,9 @@ def _compute_lnprior_companion(
     """
     n = len(idxs)
 
-    if contrast_curve is None:
+    curves = normalize_contrast_curves(contrast_curve)
+
+    if not curves:
         # Recompute delta_mags from flux ratios for the drawn samples
         fr = fluxratios_comp[idxs]
         delta_mags_drawn = 2.5 * np.log10(fr / (1 - fr))
@@ -215,27 +268,38 @@ def _compute_lnprior_companion(
         lnprior[delta_mags_drawn > 0.0] = -np.inf
         return lnprior
 
-    # With contrast curve: select the right band's delta_mags
-    separations = contrast_curve.separations_arcsec  # type: ignore[union-attr]
-    contrasts = contrast_curve.delta_mags  # type: ignore[union-attr]
+    allowed_separations = []
+    bright_mask = np.zeros(n, dtype=bool)
+    for curve in curves:
+        delta_mags_band = _delta_mags_for_band(delta_mags_map, curve.band)[idxs]
+        allowed_separations.append(
+            separation_at_contrast(
+                np.abs(delta_mags_band),
+                curve.separations_arcsec,
+                curve.delta_mags,
+            )
+        )
+        bright_mask |= delta_mags_band > 0.0
 
-    filt_key_map = {
-        "J": "delta_Jmags",
-        "H": "delta_Hmags",
-        "K": "delta_Kmags",
-    }
-    key = filt_key_map.get(filt or "", "delta_TESSmags")
-    delta_mags_band = delta_mags_map[key][idxs]
-
-    lnprior = lnprior_background(
-        n_comp,
-        np.abs(delta_mags_band),
-        separations,
-        contrasts,
-        numerical_mode=numerical_mode,
-    )
+    if len(curves) == 1:
+        curve = curves[0]
+        delta_mags_band = _delta_mags_for_band(delta_mags_map, curve.band)[idxs]
+        lnprior = lnprior_background(
+            n_comp,
+            np.abs(delta_mags_band),
+            curve.separations_arcsec,
+            curve.delta_mags,
+            numerical_mode=numerical_mode,
+        )
+    else:
+        combined_separations = np.min(np.vstack(allowed_separations), axis=0)
+        lnprior = lnprior_background_from_separations(
+            n_comp,
+            combined_separations,
+            numerical_mode=numerical_mode,
+        )
     lnprior[lnprior > 0.0] = 0.0
-    lnprior[delta_mags_band > 0.0] = -np.inf
+    lnprior[bright_mask] = -np.inf
     return lnprior
 
 
@@ -246,14 +310,16 @@ def _compute_bright_background_lnprior(
     fluxratios_eb_band: np.ndarray,
     contrast_curve: object | None,
     numerical_mode: str = "corrected",
+    band_fluxratio_resolver: Callable[[str], tuple[np.ndarray, np.ndarray]] | None = None,
 ) -> np.ndarray:
     """Background prior for BEB using combined host+EB brightness."""
     n = len(idxs)
     delta_mags = _combined_delta_mag(
         fluxratios_comp_band, fluxratios_eb_band,
     )
+    curves = normalize_contrast_curves(contrast_curve)
 
-    if contrast_curve is None:
+    if not curves:
         if numerical_mode == "legacy":
             lnprior = np.full(
                 n,
@@ -277,19 +343,49 @@ def _compute_bright_background_lnprior(
                 "numerical_mode must be 'corrected' or 'legacy', "
                 f"got {numerical_mode!r}"
             )
+        bright_mask = delta_mags > 0.0
     else:
-        separations = contrast_curve.separations_arcsec  # type: ignore[union-attr]
-        contrasts = contrast_curve.delta_mags  # type: ignore[union-attr]
-        lnprior = lnprior_background(
-            n_comp,
-            np.abs(delta_mags),
-            separations,
-            contrasts,
-            numerical_mode=numerical_mode,
-        )
+        allowed_separations = []
+        bright_mask = np.zeros(n, dtype=bool)
+        for curve in curves:
+            if len(curves) == 1 and band_fluxratio_resolver is None:
+                delta_mags_curve = delta_mags
+            else:
+                if band_fluxratio_resolver is None:
+                    raise ValueError(
+                        "Multiple contrast curves for bright-background scenarios "
+                        "require a band_fluxratio_resolver."
+                    )
+                comp_fr, eb_fr = band_fluxratio_resolver(curve.band)
+                delta_mags_curve = _combined_delta_mag(comp_fr, eb_fr)
+            allowed_separations.append(
+                separation_at_contrast(
+                    np.abs(delta_mags_curve),
+                    curve.separations_arcsec,
+                    curve.delta_mags,
+                )
+            )
+            bright_mask |= delta_mags_curve > 0.0
+
+        if len(curves) == 1 and band_fluxratio_resolver is None:
+            curve = curves[0]
+            lnprior = lnprior_background(
+                n_comp,
+                np.abs(delta_mags),
+                curve.separations_arcsec,
+                curve.delta_mags,
+                numerical_mode=numerical_mode,
+            )
+        else:
+            combined_separations = np.min(np.vstack(allowed_separations), axis=0)
+            lnprior = lnprior_background_from_separations(
+                n_comp,
+                combined_separations,
+                numerical_mode=numerical_mode,
+            )
 
     lnprior[lnprior > 0.0] = 0.0
-    lnprior[delta_mags > 0.0] = -np.inf
+    lnprior[bright_mask] = -np.inf
     return lnprior
 
 

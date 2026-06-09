@@ -9,7 +9,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from triceratops.domain.value_objects import ContrastCurve, ContrastCurveSet
 from triceratops.population.protocols import TRILEGALResult
+from triceratops.priors.lnpriors import lnprior_background
 from triceratops.scenarios._background_helpers import (
     _combined_delta_mag,
     _compute_fluxratios_comp,
@@ -307,4 +309,70 @@ class TestComputeLnpriorCompanion:
             numerical_mode="corrected",
         )
         expected = np.log((25 / 0.1) * (1 / 3600) ** 2 * 2.2**2)
+        np.testing.assert_allclose(result, expected)
+
+    def test_curve_set_single_matches_single_curve(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        idxs = np.array([0, 1, 2])
+        fluxratios_comp = np.array([0.1, 0.2, 0.3])
+        delta_mags_map = {"delta_TESSmags": np.array([-1.5, -2.5, -3.5])}
+
+        single = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=curve,
+            filt="TESS",
+            numerical_mode="corrected",
+        )
+        as_set = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([curve]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+
+        np.testing.assert_array_equal(as_set, single)
+
+    def test_curve_set_uses_tightest_curve_per_draw(self) -> None:
+        loose = ContrastCurve(
+            separations_arcsec=np.array([0.2, 1.0, 2.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        tight = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        idxs = np.array([0, 1, 2])
+        fluxratios_comp = np.array([0.1, 0.2, 0.3])
+        delta_mags_map = {"delta_TESSmags": np.array([-1.5, -2.5, -3.5])}
+
+        result = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([loose, tight]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+        expected = lnprior_background(
+            25,
+            np.abs(delta_mags_map["delta_TESSmags"][idxs]),
+            tight.separations_arcsec,
+            tight.delta_mags,
+            numerical_mode="corrected",
+        )
+        expected[expected > 0.0] = 0.0
+
         np.testing.assert_allclose(result, expected)

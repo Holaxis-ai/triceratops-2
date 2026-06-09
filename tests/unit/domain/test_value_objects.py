@@ -8,8 +8,10 @@ import pytest
 
 from triceratops.domain.value_objects import (
     ContrastCurve,
+    ContrastCurveSet,
     LimbDarkeningCoeffs,
     StellarParameters,
+    normalize_contrast_curves,
 )
 
 
@@ -79,6 +81,42 @@ class TestContrastCurve:
                 delta_mags=np.array([1.0]),
                 band="K",
             )
+
+
+class TestContrastCurveSet:
+    def test_curve_set_preserves_curves_and_bands(self) -> None:
+        j_curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="J",
+        )
+        k_curve = ContrastCurve(
+            separations_arcsec=np.array([0.2, 1.5]),
+            delta_mags=np.array([3.0, 7.0]),
+            band="K",
+        )
+
+        curve_set = ContrastCurveSet([j_curve, k_curve])
+
+        assert tuple(curve_set) == (j_curve, k_curve)
+        assert len(curve_set) == 2
+        assert curve_set.bands == ("J", "K")
+
+    def test_curve_set_rejects_empty(self) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            ContrastCurveSet([])
+
+    def test_normalize_contrast_curves(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="TESS",
+        )
+        curve_set = ContrastCurveSet([curve])
+
+        assert normalize_contrast_curves(None) == ()
+        assert normalize_contrast_curves(curve) == (curve,)
+        assert normalize_contrast_curves(curve_set) == (curve,)
 
 
 class TestLimbDarkeningCoeffs:
