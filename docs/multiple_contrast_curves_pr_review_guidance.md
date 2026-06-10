@@ -194,4 +194,3 @@ This PR is ready for approval if:
   combination, and MOLUSC warning behavior.
 - The documentation clearly states the model limits and the non-monotonic FPP
   interpretation.
-
