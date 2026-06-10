@@ -49,6 +49,8 @@ BOUND = ("STP", "SEB", "SEBx2P", "PEB", "PEBx2P", "DEB", "DEBx2P")
 BACKGROUND = ("BTP", "BEB", "BEBx2P")
 NEARBY = ("NTP", "NEB", "NEBx2P")
 TARGET_EB = ("EB", "EBx2P")
+FP_SCENARIOS = BOUND + BACKGROUND + NEARBY + TARGET_EB
+_NONFINITE_FLOAT_KEY = "__nonfinite_float__"
 
 
 def _load_manifest(path: Path) -> list[dict[str, str]]:
@@ -152,6 +154,13 @@ def _curve_from_rows(rows: list[dict[str, str]]):
     return ContrastCurveSet(curves)
 
 
+def _component_owas_from_rows(rows: list[dict[str, str]]) -> list[float]:
+    return [
+        float(np.max(lib.parse_curve(row["file"], row["band"]).separations_arcsec))
+        for row in rows
+    ]
+
+
 def _scenario_totals(result) -> dict[str, float]:
     totals: dict[str, float] = {}
     for scenario in result.scenario_results:
@@ -199,6 +208,7 @@ def _result_row(
         "seconds": seconds,
         "bands": [row["band"] for row in rows],
         "component_basenames": [row["basename"] for row in rows],
+        "component_owas_arcsec": _component_owas_from_rows(rows),
         "fpp": float(result.false_positive_probability),
         "nfpp": float(result.nearby_false_positive_probability),
         "planet": _sum_group(scenarios, PLANET),
@@ -213,15 +223,49 @@ def _result_row(
 
 def _completed_keys(jsonl_path: Path) -> set[tuple[str, str, int, int]]:
     keys: set[tuple[str, str, int, int]] = set()
-    if not jsonl_path.exists():
-        return keys
-    with jsonl_path.open() as f:
-        for line in f:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            keys.add((row["slug"], row["variant"], int(row["seed"]), int(row["n_mc"])))
+    for row in _read_jsonl(jsonl_path):
+        keys.add((row["slug"], row["variant"], int(row["seed"]), int(row["n_mc"])))
     return keys
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, float):
+        if math.isnan(value):
+            return {_NONFINITE_FLOAT_KEY: "NaN"}
+        if value == math.inf:
+            return {_NONFINITE_FLOAT_KEY: "Infinity"}
+        if value == -math.inf:
+            return {_NONFINITE_FLOAT_KEY: "-Infinity"}
+        return value
+    if isinstance(value, np.floating):
+        return _json_safe(float(value))
+    if isinstance(value, dict):
+        return {key: _json_safe(inner) for key, inner in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe(inner) for inner in value]
+    return value
+
+
+def _json_restore(value: Any) -> Any:
+    if isinstance(value, dict):
+        if set(value) == {_NONFINITE_FLOAT_KEY}:
+            tag = value[_NONFINITE_FLOAT_KEY]
+            if tag == "NaN":
+                return float("nan")
+            if tag == "Infinity":
+                return math.inf
+            if tag == "-Infinity":
+                return -math.inf
+        return {key: _json_restore(inner) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [_json_restore(inner) for inner in value]
+    return value
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    with path.open("w") as f:
+        for row in rows:
+            f.write(json.dumps(_json_safe(row), sort_keys=True, allow_nan=False) + "\n")
 
 
 def _rewrite_without_keys(
@@ -237,20 +281,18 @@ def _rewrite_without_keys(
             row["slug"], row["variant"], int(row["seed"]), int(row["n_mc"])
         ) not in keys_to_remove
     ]
-    with jsonl_path.open("w") as f:
-        for row in kept:
-            f.write(json.dumps(row, sort_keys=True) + "\n")
+    _write_jsonl(jsonl_path, kept)
 
 
 def _append_jsonl(path: Path, row: dict[str, Any]) -> None:
     with path.open("a") as f:
-        f.write(json.dumps(row, sort_keys=True) + "\n")
+        f.write(json.dumps(_json_safe(row), sort_keys=True, allow_nan=False) + "\n")
         f.flush()
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     with path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -259,13 +301,64 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     with path.open() as f:
-        return [json.loads(line) for line in f if line.strip()]
+        return [_json_restore(json.loads(line)) for line in f if line.strip()]
 
 
-def _write_summaries(jsonl_path: Path, output_dir: Path) -> None:
+def _summary_mean(values: list[float]) -> float:
+    if all(math.isfinite(value) for value in values):
+        return statistics.fmean(values)
+    if all(value == values[0] for value in values):
+        return values[0]
+    return float("nan")
+
+
+def _summary_stdev(values: list[float]) -> float:
+    if len(values) <= 1:
+        return 0.0
+    if all(math.isfinite(value) for value in values):
+        return statistics.stdev(values)
+    if all(value == values[0] for value in values):
+        return 0.0
+    return float("nan")
+
+
+def _selection_owa_lookup(selection_rows: list[dict[str, Any]]) -> dict[tuple[str, str], float]:
+    return {
+        (row["slug"], row["band"]): float(row["owa_arcsec"])
+        for row in selection_rows
+    }
+
+
+def _backfill_component_owas(
+    rows: list[dict[str, Any]],
+    selected_owas: dict[tuple[str, str], float],
+) -> None:
+    for row in rows:
+        if row.get("component_owas_arcsec") is not None:
+            continue
+        row["component_owas_arcsec"] = [
+            selected_owas[(row["slug"], band)]
+            for band in row["bands"]
+        ]
+
+
+def _write_summaries(
+    jsonl_path: Path,
+    output_dir: Path,
+    *,
+    selected_owas: dict[tuple[str, str], float] | None = None,
+) -> None:
     rows = _read_jsonl(jsonl_path)
+    if selected_owas is not None:
+        _backfill_component_owas(rows, selected_owas)
+        _write_jsonl(jsonl_path, rows)
     _write_seed_paired_impact(rows, output_dir)
     _write_ln_evidence_summary(rows, output_dir)
+    _write_ln_evidence_monotonicity_check(
+        rows,
+        output_dir,
+        selected_owas=selected_owas,
+    )
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         grouped[(row["slug"], row["variant"])].append(row)
@@ -370,8 +463,8 @@ def _write_ln_evidence_summary(rows: list[dict[str, Any]], output_dir: Path) -> 
             "variant": variant,
             "scenario": scenario,
             "n_seeds": len(values),
-            "ln_evidence_mean": statistics.fmean(values),
-            "ln_evidence_std": statistics.stdev(values) if len(values) > 1 else 0.0,
+            "ln_evidence_mean": _summary_mean(values),
+            "ln_evidence_std": _summary_stdev(values),
         })
     _write_csv(
         output_dir / "ln_evidence_summary_local_multicc.csv",
@@ -381,6 +474,170 @@ def _write_ln_evidence_summary(rows: list[dict[str, Any]], output_dir: Path) -> 
             "ln_evidence_mean", "ln_evidence_std",
         ],
     )
+
+
+def _read_selected_curve_owas(output_dir: Path) -> dict[tuple[str, str], float]:
+    selected_path = output_dir / "selected_curves_local_multicc.csv"
+    if not selected_path.exists():
+        return {}
+    with selected_path.open(newline="") as f:
+        return {
+            (row["slug"], row["band"]): float(row["owa_arcsec"])
+            for row in csv.DictReader(f)
+        }
+
+
+def _component_owas_for_row(
+    row: dict[str, Any],
+    selected_owas: dict[tuple[str, str], float],
+) -> list[float]:
+    row_owas = row.get("component_owas_arcsec")
+    if isinstance(row_owas, list) and len(row_owas) == len(row["bands"]):
+        return [float(owa) for owa in row_owas]
+
+    missing = [
+        band for band in row["bands"]
+        if (row["slug"], band) not in selected_owas
+    ]
+    if missing:
+        raise AssertionError(
+            "Missing component OWA metadata for "
+            f"{row['slug']}:{row['variant']} bands={missing}"
+        )
+    return [selected_owas[(row["slug"], band)] for band in row["bands"]]
+
+
+def _all_blind_margin_bound(
+    row: dict[str, Any],
+    selected_owas: dict[tuple[str, str], float],
+) -> float:
+    curve_owas = _component_owas_for_row(row, selected_owas)
+    if len(curve_owas) < 2:
+        return 0.0
+    min_owa = min(curve_owas)
+    max_owa = max(curve_owas)
+    if min_owa <= 0.0 or max_owa <= 0.0:
+        return 0.0
+    return 2.0 * math.log(max_owa / min_owa)
+
+
+def _ln_evidence_margin(multi_value: float, best_single_value: float) -> float:
+    if multi_value == best_single_value:
+        return 0.0
+    if multi_value == -math.inf:
+        return -math.inf
+    if best_single_value == -math.inf:
+        return math.inf
+    return multi_value - best_single_value
+
+
+def _write_ln_evidence_monotonicity_check(
+    rows: list[dict[str, Any]],
+    output_dir: Path,
+    *,
+    selected_owas: dict[tuple[str, str], float] | None = None,
+    tolerance: float = 1e-9,
+) -> None:
+    by_key = {
+        (row["slug"], row["variant"], int(row["seed"]), int(row["n_mc"])): row
+        for row in rows
+    }
+    selected_owas = selected_owas or _read_selected_curve_owas(output_dir)
+    check_rows: list[dict[str, Any]] = []
+    violations: list[dict[str, Any]] = []
+    coverage_errors: list[str] = []
+    for row in rows:
+        if not row["variant"].startswith("multi_"):
+            continue
+        slug = row["slug"]
+        seed = int(row["seed"])
+        n_mc = int(row["n_mc"])
+        singles = [
+            by_key.get((slug, f"single_{band.lower()}", seed, n_mc))
+            for band in row["bands"]
+        ]
+        if any(single is None for single in singles):
+            coverage_errors.append(f"{slug}:{row['variant']}:seed{seed}:missing single")
+            continue
+        multi_lnz = row.get("ln_evidence") or {}
+        if not isinstance(multi_lnz, dict):
+            coverage_errors.append(f"{slug}:{row['variant']}:seed{seed}:missing multi lnZ")
+            continue
+        for scenario in FP_SCENARIOS:
+            if scenario not in multi_lnz:
+                coverage_errors.append(
+                    f"{slug}:{row['variant']}:{scenario}:seed{seed}:missing multi scenario"
+                )
+                continue
+            missing_single_scenarios = [
+                single["variant"] for single in singles
+                if (
+                    not isinstance(single.get("ln_evidence"), dict)
+                    or scenario not in single["ln_evidence"]
+                )
+            ]
+            if missing_single_scenarios:
+                coverage_errors.append(
+                    f"{slug}:{row['variant']}:{scenario}:seed{seed}:"
+                    f"missing singles={missing_single_scenarios}"
+                )
+                continue
+            single_values = [
+                float(single["ln_evidence"][scenario])
+                for single in singles
+            ]
+            multi_value = float(multi_lnz[scenario])
+            best_single_value = min(single_values)
+            margin = _ln_evidence_margin(multi_value, best_single_value)
+            all_blind_margin_bound = _all_blind_margin_bound(row, selected_owas)
+            strict_passed = margin <= tolerance
+            passed = margin <= all_blind_margin_bound + tolerance
+            check_row = {
+                "target": row["target"],
+                "slug": slug,
+                "seed": seed,
+                "n_mc": n_mc,
+                "multi_variant": row["variant"],
+                "scenario": scenario,
+                "lnz_multi": multi_value,
+                "lnz_best_single": best_single_value,
+                "margin": margin,
+                "all_blind_margin_bound": all_blind_margin_bound,
+                "tolerance": tolerance,
+                "strict_passed": strict_passed,
+                "passed": passed,
+            }
+            check_rows.append(check_row)
+            if not passed:
+                violations.append(check_row)
+
+    if coverage_errors:
+        preview = ", ".join(coverage_errors[:5])
+        raise AssertionError(
+            "Raw FP lnZ monotonicity coverage errors detected: "
+            f"{len(coverage_errors)} total; first errors: {preview}"
+        )
+    if not check_rows:
+        raise AssertionError("Raw FP lnZ monotonicity check produced no rows")
+
+    _write_csv(
+        output_dir / "ln_evidence_monotonicity_check_local_multicc.csv",
+        check_rows,
+        [
+            "target", "slug", "seed", "n_mc", "multi_variant", "scenario",
+            "lnz_multi", "lnz_best_single", "margin", "all_blind_margin_bound",
+            "tolerance", "strict_passed", "passed",
+        ],
+    )
+    if violations:
+        preview = ", ".join(
+            f"{row['slug']}:{row['multi_variant']}:{row['scenario']}:seed{row['seed']}"
+            for row in violations[:5]
+        )
+        raise AssertionError(
+            "Raw FP lnZ monotonicity violations detected: "
+            f"{len(violations)} total; first violations: {preview}"
+        )
 
 
 def _write_seed_paired_impact(rows: list[dict[str, Any]], output_dir: Path) -> None:
@@ -513,7 +770,13 @@ def main() -> None:
     manifest = HARNESS_ROOT / "data" / "curves" / "manifest.csv"
     rows = _load_manifest(manifest)
 
-    selection_rows = _curve_selection_rows(rows, args.targets)
+    selection_targets = list(args.targets)
+    if args.summary_only and jsonl_path.exists():
+        run_rows = _read_jsonl(jsonl_path)
+        selection_targets = sorted({row["slug"] for row in run_rows}) or selection_targets
+
+    selection_rows = _curve_selection_rows(rows, selection_targets)
+    selected_owas = _selection_owa_lookup(selection_rows)
     _write_csv(
         output_dir / "selected_curves_local_multicc.csv",
         selection_rows,
@@ -524,7 +787,7 @@ def main() -> None:
     )
 
     if args.summary_only:
-        _write_summaries(jsonl_path, output_dir)
+        _write_summaries(jsonl_path, output_dir, selected_owas=selected_owas)
         return
 
     if args.force:
@@ -559,7 +822,7 @@ def main() -> None:
                     print(f"skip existing {key}", flush=True)
                     continue
                 if args.max_runs is not None and runs_started >= args.max_runs:
-                    _write_summaries(jsonl_path, output_dir)
+                    _write_summaries(jsonl_path, output_dir, selected_owas=selected_owas)
                     return
                 cfg = replace(
                     cfg_template,
@@ -594,7 +857,7 @@ def main() -> None:
                     f"seconds={seconds:.2f} fpp={row['fpp']:.8g}",
                     flush=True,
                 )
-    _write_summaries(jsonl_path, output_dir)
+    _write_summaries(jsonl_path, output_dir, selected_owas=selected_owas)
 
 
 if __name__ == "__main__":

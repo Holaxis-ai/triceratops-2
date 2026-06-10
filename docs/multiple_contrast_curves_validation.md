@@ -1,33 +1,30 @@
 # Multiple Contrast Curves: Local Validation Report
 
-Date: 2026-06-09
+Date: 2026-06-10
 
 Branch: `codex/multiple-contrast-curves`
 
-Implementation commits:
-
-- `5380d97 Support multiple contrast curves`
-- `cb58c05 Document local multi-curve validation`
-
-Follow-up validation changes:
-
-- `scripts/validate_multiple_contrast_curves.py`
-- generator-safe contrast-curve input canonicalization at the validation boundary
-
 ## Scope
 
-This report validates the local multiple-contrast-curve implementation with
-realistic Monte Carlo settings and matched seeds.  It replaces the earlier
-`n_mc_samples=300` smoke test; the low-sample run was useful only for plumbing.
+This report validates the Phase 1 multiple-contrast-curve implementation after
+the blind-curve guard:
 
-The validation uses the compare-harness curve manifest and prepared artifacts
-read-only from:
+- A curve that is blind to a draw contributes no constraint to the multi-curve
+  min-combine.
+- If all curves are blind for a draw, the multi-curve path falls back to the
+  largest component outer working angle.
+- Single-curve behavior remains canonical/TRICERATOPS-compatible, including
+  the inherited faint-end OWA clamp.
+- Band aliases now include `Jcont`, `Hcont`, `Brgamma`, and `LP600`; existing
+  `562nm` and `832nm` labels still route to the visible/TESS approximation.
+
+The validation uses prepared artifacts and contrast-curve manifests read-only
+from:
 
 `/Users/collier/projects/Holaxis/astro/analysis/contrast-curve-best-of-both`
 
-The harness helper `lib.compute_at_seed()` was not used because it hardcodes
-Modal.  The local driver calls `auto_fpp.compute.compute_prepared_artifact()`
-with `AutoFppComputeConfig(compute_backend="local", bin_count=200)`.
+The local driver calls `auto_fpp.compute.compute_prepared_artifact()` with
+`AutoFppComputeConfig(compute_backend="local", bin_count=200)`.
 
 ## Artifacts
 
@@ -35,25 +32,28 @@ Generated outputs live under:
 
 `docs/multiple_contrast_curves_validation/`
 
-- `runs_local_multicc.jsonl`: 145 full local runs, one row per target/variant/seed.
+- `runs_local_multicc.jsonl`: 145 local runs, one row per target/variant/seed;
+  component OWAs are serialized with each contrast-curve row, and non-finite
+  `lnZ` values use strict-JSON-safe tags.
 - `selected_curves_local_multicc.csv`: predeclared curve selection by geometry.
 - `summary_local_multicc.csv`: per-target/variant means over five seeds.
 - `impact_local_multicc.csv`: mean deltas versus the best single-band variant.
 - `seed_paired_impact_local_multicc.csv`: matched-seed deltas for every multi run.
-- `ln_evidence_summary_local_multicc.csv`: per-scenario raw `lnZ` means for
-  rerun rows with raw-evidence capture.  Currently this covers TOI-6067.
+- `ln_evidence_summary_local_multicc.csv`: per-scenario raw `lnZ` means for all
+  four validation targets.
+- `ln_evidence_monotonicity_check_local_multicc.csv`: raw `lnZ` monotonicity
+  diagnostic with a strict check and the analytically allowed all-blind OWA
+  envelope.
 - `toi6067_fpp_distribution_interpretation.md`: detailed explanation of the
-  TOI-6067 probability distribution and why DTP suppression does not simply
-  redistribute to TP.
+  remaining TOI-6067 normalized-FPP behavior.
 
 ## Environment
 
-Command shape:
+Command:
 
 ```bash
-PYTHONPATH=/Users/collier/projects/Holaxis/astro/triceratops:/Users/collier/projects/Holaxis/astro/analysis/contrast-curve-best-of-both:/Users/collier/projects/Holaxis/astro/triceratops-auto \
-  /Users/collier/projects/Holaxis/astro/triceratops-auto/.venv/bin/python \
-  scripts/validate_multiple_contrast_curves.py
+/Users/collier/projects/Holaxis/astro/triceratops-auto/.venv/bin/python \
+  scripts/validate_multiple_contrast_curves.py --force
 ```
 
 Compute config:
@@ -65,7 +65,7 @@ Compute config:
 - `n_workers=0`
 - seeds: `101`, `211`, `323`, `437`, `541`
 
-Curve selection was predeclared before FPP evaluation.  For each target and
+Curve selection was predeclared before FPP evaluation. For each target and
 band, the selected curve minimizes `sep_at_dmag_3`, then maximizes
 `dmag_at_0.5`, then maximizes maximum depth.
 
@@ -95,11 +95,12 @@ band, the selected curve minimizes `sep_at_dmag_3`, then maximizes
 | `single_vis` | Vis | 0.0343707 | 0.00200695 | 0.0197772 | 0.00952768 | 2.93906e-06 | 0.965629 |
 | `single_j` | J | 0.0485524 | 0.00347718 | 0.017822 | 0.025424 | 0.000743247 | 0.951448 |
 | `single_k` | K | 0.033494 | 0.00206223 | 0.0193179 | 0.00921015 | 2.10054e-05 | 0.966506 |
-| `multi_k_vis` | K+Vis | 0.0326307 | 0.00200917 | 0.0198598 | 0.00768402 | 2.9499e-06 | 0.967369 |
+| `multi_k_vis` | K+Vis | 0.032194 | 0.0019282 | 0.019578 | 0.00760159 | 2.90769e-06 | 0.967806 |
 | `multi_j_k` | J+K | 0.0338101 | 0.0021242 | 0.0195107 | 0.00928362 | 2.12175e-05 | 0.96619 |
-| `multi_j_k_vis` | J+K+Vis | 0.0326307 | 0.00200917 | 0.0198598 | 0.00768402 | 2.9499e-06 | 0.967369 |
+| `multi_j_k_vis` | J+K+Vis | 0.0324989 | 0.00198626 | 0.0197746 | 0.00765924 | 2.93717e-06 | 0.967501 |
+| `multi_all_selected_bands` | Vis+J+K | 0.0324989 | 0.00198626 | 0.0197746 | 0.00765924 | 2.93717e-06 | 0.967501 |
 
-Interpretation: `K+Vis` improves on the best single-band result.  `J` is not
+Interpretation: `K+Vis` improves on the best single-band result. `J` is not
 limiting once `K` and `Vis` are included.
 
 ### TOI-5961.01
@@ -109,7 +110,8 @@ limiting once `K` and `Vis` are included.
 | `no_curve` | none | 0.0856582 | 0.00830487 | 4.47352e-07 | 0.0856517 | 6.03403e-06 | 0.914342 |
 | `single_vis` | Vis | 5.84218e-07 | 1.04897e-07 | 5.61662e-07 | 2.18622e-12 | 2.2554e-08 | 0.999999 |
 | `single_k` | K | 0.000298427 | 0.000205655 | 5.46402e-07 | 0.000297585 | 2.94971e-07 | 0.999702 |
-| `multi_k_vis` | K+Vis | 5.84216e-07 | 1.04898e-07 | 5.61667e-07 | 2.18624e-12 | 2.25469e-08 | 0.999999 |
+| `multi_k_vis` | K+Vis | 5.72145e-07 | 1.01993e-07 | 5.50053e-07 | 2.13643e-12 | 2.20893e-08 | 0.999999 |
+| `multi_all_selected_bands` | Vis+K | 5.72145e-07 | 1.01993e-07 | 5.50053e-07 | 2.13643e-12 | 2.20893e-08 | 0.999999 |
 
 Interpretation: the selected `Vis` curve dominates; adding `K` is effectively
 neutral at this precision.
@@ -122,11 +124,13 @@ neutral at this precision.
 | `single_vis` | Vis | 0.0760069 | 0.0201182 | 4.07832e-06 | 0.0759313 | 9.76218e-06 | 0.923993 |
 | `single_j` | J | 0.114562 | 0.0198201 | 3.43836e-06 | 0.114237 | 0.000270842 | 0.885438 |
 | `single_k` | K | 0.0794148 | 0.0186227 | 4.01551e-06 | 0.0793438 | 7.46733e-06 | 0.920585 |
-| `multi_k_vis` | K+Vis | 0.0742372 | 0.0190142 | 4.17324e-06 | 0.0741644 | 6.20711e-06 | 0.925763 |
+| `multi_k_vis` | K+Vis | 0.0730492 | 0.0182992 | 4.11237e-06 | 0.0729779 | 6.09542e-06 | 0.926951 |
 | `multi_j_k` | J+K | 0.0802638 | 0.0191041 | 4.05448e-06 | 0.0801919 | 7.55472e-06 | 0.919736 |
+| `multi_j_k_vis` | J+K+Vis | 0.0738519 | 0.0187806 | 4.15335e-06 | 0.0737797 | 6.1707e-06 | 0.926148 |
+| `multi_all_selected_bands` | Vis+J+K | 0.0738519 | 0.0187806 | 4.15335e-06 | 0.0737797 | 6.1707e-06 | 0.926148 |
 
-Interpretation: `K+Vis` improves on both selected `K` and selected `Vis`.  `J`
-again does not add a limiting constraint after `K+Vis`.
+Interpretation: `K+Vis` improves on both selected `K` and selected `Vis`.
+`J` again does not add a limiting constraint after `K+Vis`.
 
 ### TOI-6067.01
 
@@ -136,112 +140,131 @@ again does not add a limiting constraint after `K+Vis`.
 | `single_vis` | Vis | 0.1348 | 0.00829831 | 0.00383668 | 0.118077 | 0.0115535 | 0.8652 |
 | `single_h` | H | 0.0937395 | 0.00606196 | 0.00314967 | 0.0875255 | 0.00197807 | 0.906261 |
 | `single_k` | K | 0.0820877 | 0.0044755 | 0.00272845 | 0.0763424 | 0.00208329 | 0.917912 |
-| `multi_k_vis` | K+Vis | 0.115122 | 0.00662524 | 0.00401074 | 0.106698 | 0.00302373 | 0.884878 |
+| `multi_k_vis` | K+Vis | 0.0794544 | 0.00425059 | 0.00275104 | 0.0736941 | 0.00206712 | 0.920546 |
 | `multi_h_k` | H+K | 0.0931765 | 0.00602282 | 0.00315529 | 0.0869528 | 0.00197988 | 0.906823 |
-| `multi_h_k_vis` | H+K+Vis | 0.113689 | 0.00654828 | 0.00403756 | 0.105742 | 0.00251124 | 0.886311 |
+| `multi_h_k_vis` | H+K+Vis | 0.0903103 | 0.00579781 | 0.00318467 | 0.0840515 | 0.00197433 | 0.90969 |
+| `multi_all_selected_bands` | Vis+H+K | 0.0903103 | 0.00579781 | 0.00318467 | 0.0840515 | 0.00197433 | 0.90969 |
 
-Interpretation: `H+K` is slightly better than `H` alone but worse than `K`
-alone on total FPP. Adding `Vis` raises total FPP relative to `K`.  This is not
-Monte Carlo noise; it occurs for all five matched seeds.  The raw-evidence
-diagnostic below shows that the multi curve lowers false-positive scenario
-evidence relative to `single_k`, but it lowers planet-channel companion
-scenario evidence as well.  Therefore total FPP is not a monotonic invariant for
-this validation.
+Interpretation: after the blind-curve guard, `K+Vis` is now better than `K`
+alone on total FPP. The remaining non-monotonic normalized-FPP behavior is in
+the H-containing combinations: `H+K` and `H+K+Vis` lower background evidence
+relative to `K`, but they also reduce the planet-side total enough that
+normalized FPP is higher than `single_k`.
 
 ## Impact Summary
 
 | target | multi variant | best single | delta FPP | delta bound | delta background | delta FPP vs no curve |
 |---|---|---|---:|---:|---:|---:|
-| TOI-1738.01 | `multi_k_vis` | `single_k` | -0.000863 | -0.001526 | -0.0000181 | -0.035347 |
-| TOI-5961.01 | `multi_k_vis` | `single_vis` | -2.12e-12 | 2.32e-17 | -7.09e-12 | -0.085658 |
-| TOI-1703.01 | `multi_k_vis` | `single_vis` | -0.001770 | -0.001767 | -0.00000356 | -0.054076 |
-| TOI-6067.01 | `multi_h_k` | `single_k` | +0.011089 | +0.010610 | -0.000103 | -0.091178 |
-| TOI-6067.01 | `multi_h_k_vis` | `single_k` | +0.031601 | +0.029399 | +0.000428 | -0.070665 |
-| TOI-6067.01 | `multi_k_vis` | `single_k` | +0.033035 | +0.030355 | +0.000940 | -0.069232 |
-
-The seed-paired diagnostic found no cases where a multi-curve channel
-probability exceeded the loosest component single-curve channel probability.
-That check is intentionally weak.  It does not prove monotonicity relative to
-the strongest component single curve; in fact, 40 of 70 multi rows exceed the
-minimum component-single bound posterior and 48 of 70 exceed the minimum
-component-single background posterior.  These are normalized posterior
-probabilities, not raw priors.
+| TOI-1703.01 | `multi_all_selected_bands` | `single_vis` | -0.00215492 | -0.00215165 | -3.59148e-06 | -0.0544612 |
+| TOI-1703.01 | `multi_j_k` | `single_vis` | +0.00425697 | +0.00426056 | -2.20746e-06 | -0.0480494 |
+| TOI-1703.01 | `multi_j_k_vis` | `single_vis` | -0.00215492 | -0.00215165 | -3.59148e-06 | -0.0544612 |
+| TOI-1703.01 | `multi_k_vis` | `single_vis` | -0.00295768 | -0.00295338 | -3.66676e-06 | -0.055264 |
+| TOI-1738.01 | `multi_all_selected_bands` | `single_k` | -0.000995045 | -0.00155091 | -1.80682e-05 | -0.0354787 |
+| TOI-1738.01 | `multi_j_k` | `single_k` | +0.000316131 | +7.34703e-05 | +2.12106e-07 | -0.0341675 |
+| TOI-1738.01 | `multi_j_k_vis` | `single_k` | -0.000995045 | -0.00155091 | -1.80682e-05 | -0.0354787 |
+| TOI-1738.01 | `multi_k_vis` | `single_k` | -0.00129994 | -0.00160856 | -1.80977e-05 | -0.0357836 |
+| TOI-5961.01 | `multi_all_selected_bands` | `single_vis` | -1.20735e-08 | -4.9786e-14 | -4.64693e-10 | -0.0856576 |
+| TOI-5961.01 | `multi_k_vis` | `single_vis` | -1.20735e-08 | -4.9786e-14 | -4.64693e-10 | -0.0856576 |
+| TOI-6067.01 | `multi_all_selected_bands` | `single_k` | +0.00822265 | +0.00770911 | -0.000108957 | -0.0940439 |
+| TOI-6067.01 | `multi_h_k` | `single_k` | +0.0110888 | +0.0106104 | -0.000103409 | -0.0911778 |
+| TOI-6067.01 | `multi_h_k_vis` | `single_k` | +0.00822265 | +0.00770911 | -0.000108957 | -0.0940439 |
+| TOI-6067.01 | `multi_k_vis` | `single_k` | -0.00263331 | -0.0026483 | -1.61693e-05 | -0.1049 |
 
 ## Raw Evidence Diagnostic
 
-TOI-6067 was rerun after adding `ln_evidence` capture to
-`runs_local_multicc.jsonl`.  The rerun reproduces the same FPP values and adds
-`ln_evidence_summary_local_multicc.csv`.
+Raw `lnZ` capture now covers all four validation targets.
 
-Mean `lnZ` values for selected TOI-6067 scenarios:
+The strict diagnostic checks whether each multi-curve FP scenario has
+`lnZ(multi) <= min(lnZ(component singles))`. That strict check is useful, but
+it is too strong for the agreed Phase 1 semantics because single-curve paths
+retain the canonical faint-end OWA clamp while multi-curve all-blind draws fall
+back to the largest component OWA. Therefore the validation also computes the
+maximum possible all-blind margin:
 
-| scenario | single K | single Vis | multi K+Vis | multi K+Vis - single K |
-|---|---:|---:|---:|---:|
-| TP | -72.607 | -72.607 | -72.607 | +0.000 |
-| PTP | -75.050 | -74.949 | -75.161 | -0.112 |
-| DTP | -73.100 | -75.735 | -75.877 | -2.776 |
-| STP | -76.637 | -76.827 | -76.892 | -0.255 |
-| SEB | -74.898 | -74.749 | -74.909 | -0.011 |
-| SEBx2P | -76.525 | -76.432 | -76.563 | -0.037 |
-| PEBx2P | -82.512 | -82.516 | -82.613 | -0.100 |
-| BTP | -91.360 | -91.979 | -92.548 | -1.188 |
-| BEB | -78.647 | -77.252 | -78.669 | -0.023 |
-| BEBx2P | -79.175 | -77.854 | -79.179 | -0.004 |
-
-This resolves the main TOI-6067 ambiguity at the scenario-evidence level:
-`multi_k_vis` is not increasing raw false-positive evidence relative to
-`single_k`.  It lowers raw FP evidence, but it also lowers DTP/PTP, which
-TRICERATOPS counts as planet scenarios.  After normalization, the planet
-denominator shrinks enough that total FPP rises.  The validation should
-therefore use raw `lnZ`/prior diagnostics for monotonicity questions, not final
-FPP alone.
-
-## Review Findings
-
-Round-one subagent review found:
-
-- One-shot iterable inputs were unsafe: `_single_contrast_curve_band()` consumed
-  generators before scenario workers saw them.  This is fixed by
-  `canonicalize_contrast_curve_input()` and covered by unit tests.
-- Engine-level generator dispatch is also covered: `_compute()` materializes a
-  generator to `ContrastCurveSet` before scenario execution.
-- MOLUSC companion paths still bypass contrast-curve constraints.  This is a
-  pre-existing model limitation and should remain a documented caveat until
-  MOLUSC carries per-draw projected separations through the prior calculation.
-- `Vis`, `562nm`, and `832nm` use the existing TESS/visible flux spline
-  approximation, not a separately calibrated speckle bandpass.
-- SDSS `g/r/i/z` curves fail clearly if the needed target/population
-  magnitudes are unavailable; partial SDSS backfill is not implemented.
-
-## Scientific Caveats
-
-- Multiple curves are interpreted as joint radial non-detections.  The code
-  does not model position angle, azimuthal completeness, image footprint,
-  epoch differences, probabilistic non-detections, or orbit-motion effects.
-- Total FPP is an aggregate after scenario evidence normalization.  It can move
-  differently from a single channel because TRICERATOPS counts PTP and DTP as
-  planet scenarios, not false positives.
-- A single-vs-multi posterior comparison does not isolate only the contrast
-  prior when the single curve changes the active `filt` path.  Raw `lnZ` and
-  helper-level prior checks are the safer diagnostics.
-- Multi-band support is only as physical as the available flux-relation spline
-  for each band.  J/H/K and SDSS bands use hardcoded legacy splines; Vis aliases
-  map to the TESS/visible approximation.
-
-## Commands
-
-Focused tests and lint after the generator fix:
-
-```bash
-.venv/bin/pytest -q tests/unit/domain/test_value_objects.py tests/unit/validation/test_job.py
-.venv/bin/pytest -q tests/unit/domain/test_value_objects.py tests/unit/validation/test_job.py tests/unit/validation/test_engine.py::TestEngineCompute::test_compute_materializes_generator_contrast_curve
-.venv/bin/ruff check triceratops/domain/value_objects.py triceratops/validation/engine.py triceratops/validation/job.py tests/unit/domain/test_value_objects.py tests/unit/validation/test_job.py scripts/validate_multiple_contrast_curves.py
-.venv/bin/pytest -q
+```text
+2 * ln(max(component OWA) / min(component OWA))
 ```
 
 Results:
 
-- Focused tests: `36 passed`
-- Generator-dispatch focused tests: `37 passed`
-- Ruff on touched files: passed
-- Full test suite: `878 passed, 14 skipped`
+- Diagnostic rows: `1050`
+- Strict monotonic failures: `87`
+- Strict failures by scenario: `DEBx2P` = `53`, `DEB` = `34`
+- Bounded failures after the all-blind OWA envelope: `0`
+- Largest margin: `4.257480653976728`
+- Largest margin minus bound: `1.95e-14`
+
+The largest strict margin is exactly the TOI-5961 Vis/K all-blind area ratio:
+
+```text
+2 * ln(9.833 / 1.17) = 4.2574806539767085
+```
+
+So the strict violations are consistent with the intentional all-blind fallback,
+not unexplained evidence growth. All raw FP evidence margins stay within the
+analytic all-blind envelope.
+
+Selected TOI-6067 raw `lnZ` means:
+
+| scenario | single K | single H | single Vis | K+Vis | H+K+Vis | K+Vis - K | H+K+Vis - K |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| TP | -72.607 | -72.607 | -72.607 | -72.607 | -72.607 | +0.000 | +0.000 |
+| PTP | -75.050 | -75.060 | -74.949 | -75.161 | -75.192 | -0.112 | -0.142 |
+| DTP | -73.100 | -73.621 | -75.735 | -73.100 | -73.621 | -0.000 | -0.521 |
+| STP | -76.637 | -76.609 | -76.827 | -76.892 | -76.899 | -0.255 | -0.262 |
+| SEB | -74.898 | -74.912 | -74.749 | -74.909 | -74.927 | -0.011 | -0.029 |
+| SEBx2P | -76.525 | -76.532 | -76.432 | -76.563 | -76.576 | -0.037 | -0.050 |
+| PEB | -95.980 | -95.967 | -95.671 | -96.045 | -96.053 | -0.065 | -0.073 |
+| PEBx2P | -82.512 | -82.500 | -82.516 | -82.613 | -82.623 | -0.100 | -0.110 |
+| BTP | -91.360 | -91.559 | -91.979 | -92.548 | -92.630 | -1.188 | -1.270 |
+| BEB | -78.647 | -78.849 | -77.252 | -78.669 | -78.868 | -0.023 | -0.221 |
+| BEBx2P | -79.175 | -79.357 | -77.854 | -79.179 | -79.361 | -0.004 | -0.186 |
+| DEB | -97.146 | -97.490 | -99.076 | -97.673 | -97.967 | -0.527 | -0.821 |
+| DEBx2P | -82.127 | -82.877 | -84.247 | -82.127 | -82.877 | -0.000 | -0.750 |
+
+## Caveats
+
+- Multiple curves are interpreted as joint radial non-detections. The code does
+  not model position angle, azimuthal completeness, image footprint, epoch
+  differences, probabilistic non-detections, or orbit-motion effects.
+- Total FPP is an aggregate after scenario evidence normalization. It can move
+  differently from a single channel because TRICERATOPS counts PTP and DTP as
+  planet scenarios, not false positives.
+- The Phase 1 PR intentionally does not change canonical single-curve clamp
+  behavior. The all-blind multi-curve fallback is the only clamp-related change
+  in this PR.
+- Multi-band support is only as physical as the available flux-relation spline
+  for each band. J/H/K and SDSS bands use hardcoded legacy splines; Vis aliases
+  map to the TESS/visible approximation.
+
+## Commands
+
+Validation:
+
+```bash
+/Users/collier/projects/Holaxis/astro/triceratops-auto/.venv/bin/python \
+  scripts/validate_multiple_contrast_curves.py --force
+/Users/collier/projects/Holaxis/astro/triceratops-auto/.venv/bin/python \
+  scripts/validate_multiple_contrast_curves.py --summary-only
+```
+
+Code checks:
+
+```bash
+python -m pytest tests/unit/scenarios/test_background_helpers.py \
+  tests/unit/scenarios/test_btp_beb.py \
+  tests/unit/scenarios/test_ptp_peb.py \
+  tests/unit/stellar/test_relations.py \
+  tests/unit/priors/test_lnpriors.py -q
+python -m pytest -q
+python -m ruff check scripts/validate_multiple_contrast_curves.py \
+  triceratops/priors/lnpriors.py \
+  triceratops/scenarios/_background_helpers.py \
+  triceratops/scenarios/_companion_helpers.py \
+  triceratops/stellar/relations.py \
+  tests/unit/scenarios/test_background_helpers.py \
+  tests/unit/scenarios/test_btp_beb.py \
+  tests/unit/scenarios/test_ptp_peb.py \
+  tests/unit/stellar/test_relations.py
+git diff --check
+```
