@@ -33,6 +33,43 @@ def _separation_at_contrast(
     return separation_at_contrast(delta_mags, separations, contrasts)
 
 
+def separation_at_contrast_or_inf_if_blind(
+    delta_mags: np.ndarray,
+    separations: np.ndarray,
+    contrasts: np.ndarray,
+) -> np.ndarray:
+    """Return curve constraints, using inf when a curve is blind to a draw.
+
+    This is for multi-curve min-combination only. The canonical single-curve
+    TRICERATOPS clamp remains implemented by separation_at_contrast().
+    """
+    delta_mags = np.asarray(delta_mags, dtype=float)
+    separations_at_contrast = separation_at_contrast(
+        delta_mags,
+        separations,
+        contrasts,
+    )
+    return np.where(
+        delta_mags > np.max(contrasts),
+        np.inf,
+        separations_at_contrast,
+    )
+
+
+def combine_allowed_separations(
+    allowed_separations: list[np.ndarray],
+    *,
+    all_blind_fallback_arcsec: float,
+) -> np.ndarray:
+    """Min-combine per-curve constraints, falling back when all curves are blind."""
+    combined = np.min(np.vstack(allowed_separations), axis=0)
+    return np.where(
+        np.isfinite(combined),
+        combined,
+        all_blind_fallback_arcsec,
+    )
+
+
 def lnprior_host_mass_planet(mass_msun: np.ndarray) -> float:
     """Log prior on host star mass for planet scenarios.
 

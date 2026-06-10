@@ -13,9 +13,10 @@ import numpy as np
 from triceratops.domain.value_objects import normalize_contrast_curves
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.priors.lnpriors import (
+    combine_allowed_separations,
     lnprior_background,
     lnprior_background_from_separations,
-    separation_at_contrast,
+    separation_at_contrast_or_inf_if_blind,
 )
 from triceratops.scenarios.constants import (
     ARCSEC_TO_DEG,
@@ -25,6 +26,10 @@ from triceratops.stellar.relations import StellarRelations, canonicalize_filter_
 
 _relations = StellarRelations()
 _SDSS_BANDS = frozenset({"g", "r", "i", "z"})
+
+
+def _max_curve_owa_arcsec(curves: tuple) -> float:
+    return max(float(np.max(curve.separations_arcsec)) for curve in curves)
 
 
 def _sample_population_indices(
@@ -273,7 +278,7 @@ def _compute_lnprior_companion(
     for curve in curves:
         delta_mags_band = _delta_mags_for_band(delta_mags_map, curve.band)[idxs]
         allowed_separations.append(
-            separation_at_contrast(
+            separation_at_contrast_or_inf_if_blind(
                 np.abs(delta_mags_band),
                 curve.separations_arcsec,
                 curve.delta_mags,
@@ -292,7 +297,10 @@ def _compute_lnprior_companion(
             numerical_mode=numerical_mode,
         )
     else:
-        combined_separations = np.min(np.vstack(allowed_separations), axis=0)
+        combined_separations = combine_allowed_separations(
+            allowed_separations,
+            all_blind_fallback_arcsec=_max_curve_owa_arcsec(curves),
+        )
         lnprior = lnprior_background_from_separations(
             n_comp,
             combined_separations,
@@ -348,18 +356,15 @@ def _compute_bright_background_lnprior(
         allowed_separations = []
         bright_mask = np.zeros(n, dtype=bool)
         for curve in curves:
-            if len(curves) == 1 and band_fluxratio_resolver is None:
-                delta_mags_curve = delta_mags
-            else:
-                if band_fluxratio_resolver is None:
-                    raise ValueError(
-                        "Multiple contrast curves for bright-background scenarios "
-                        "require a band_fluxratio_resolver."
-                    )
-                comp_fr, eb_fr = band_fluxratio_resolver(curve.band)
-                delta_mags_curve = _combined_delta_mag(comp_fr, eb_fr)
+            if band_fluxratio_resolver is None:
+                raise ValueError(
+                    "Contrast curves for bright-background scenarios require "
+                    "a band_fluxratio_resolver."
+                )
+            comp_fr, eb_fr = band_fluxratio_resolver(curve.band)
+            delta_mags_curve = _combined_delta_mag(comp_fr, eb_fr)
             allowed_separations.append(
-                separation_at_contrast(
+                separation_at_contrast_or_inf_if_blind(
                     np.abs(delta_mags_curve),
                     curve.separations_arcsec,
                     curve.delta_mags,
@@ -367,22 +372,15 @@ def _compute_bright_background_lnprior(
             )
             bright_mask |= delta_mags_curve > 0.0
 
-        if len(curves) == 1 and band_fluxratio_resolver is None:
-            curve = curves[0]
-            lnprior = lnprior_background(
-                n_comp,
-                np.abs(delta_mags),
-                curve.separations_arcsec,
-                curve.delta_mags,
-                numerical_mode=numerical_mode,
-            )
-        else:
-            combined_separations = np.min(np.vstack(allowed_separations), axis=0)
-            lnprior = lnprior_background_from_separations(
-                n_comp,
-                combined_separations,
-                numerical_mode=numerical_mode,
-            )
+        combined_separations = combine_allowed_separations(
+            allowed_separations,
+            all_blind_fallback_arcsec=_max_curve_owa_arcsec(curves),
+        )
+        lnprior = lnprior_background_from_separations(
+            n_comp,
+            combined_separations,
+            numerical_mode=numerical_mode,
+        )
 
     lnprior[lnprior > 0.0] = 0.0
     lnprior[bright_mask] = -np.inf

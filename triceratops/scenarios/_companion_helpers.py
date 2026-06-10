@@ -14,9 +14,10 @@ import numpy as np
 from triceratops.domain.molusc import MoluscData
 from triceratops.domain.value_objects import normalize_contrast_curves
 from triceratops.priors.lnpriors import (
+    combine_allowed_separations,
     lnprior_bound_companion,
     lnprior_bound_companion_from_separations,
-    separation_at_contrast,
+    separation_at_contrast_or_inf_if_blind,
 )
 from triceratops.scenarios.constants import (
     COMPANION_DEFAULT_SEP_ARCSEC,
@@ -29,6 +30,10 @@ _relations = StellarRelations()
 # Re-exported so companion_scenarios.py can import _ln2pi from this module
 # without an import cycle.
 _ln2pi = LN2PI
+
+
+def _max_curve_owa_arcsec(curves: tuple) -> float:
+    return max(float(np.max(curve.separations_arcsec)) for curve in curves)
 
 
 def _load_molusc_qs(
@@ -135,7 +140,7 @@ def _compute_companion_prior(
         fluxratios_comp_cc = flux_comp_cc / (flux_comp_cc + flux_primary_cc)
         delta_mags = 2.5 * np.log10(fluxratios_comp_cc / (1 - fluxratios_comp_cc))
         allowed_separations.append(
-            separation_at_contrast(
+            separation_at_contrast_or_inf_if_blind(
                 np.abs(delta_mags),
                 curve.separations_arcsec,
                 curve.delta_mags,
@@ -154,7 +159,10 @@ def _compute_companion_prior(
             is_eb=is_eb,
         )
     else:
-        combined_separations = np.min(np.vstack(allowed_separations), axis=0)
+        combined_separations = combine_allowed_separations(
+            allowed_separations,
+            all_blind_fallback_arcsec=_max_curve_owa_arcsec(curves),
+        )
         lnprior_comp = lnprior_bound_companion_from_separations(
             primary_mass_msun=M_s,
             parallax_mas=plx,
@@ -247,7 +255,7 @@ def _compute_seb_companion_prior(
             + fluxratios_eb_cc / (1 - fluxratios_eb_cc)
         )
         allowed_separations.append(
-            separation_at_contrast(
+            separation_at_contrast_or_inf_if_blind(
                 np.abs(delta_mags),
                 curve.separations_arcsec,
                 curve.delta_mags,
@@ -266,7 +274,10 @@ def _compute_seb_companion_prior(
             is_eb=True,
         )
     else:
-        combined_separations = np.min(np.vstack(allowed_separations), axis=0)
+        combined_separations = combine_allowed_separations(
+            allowed_separations,
+            all_blind_fallback_arcsec=_max_curve_owa_arcsec(curves),
+        )
         lnprior_comp = lnprior_bound_companion_from_separations(
             primary_mass_msun=M_s,
             parallax_mas=plx,
