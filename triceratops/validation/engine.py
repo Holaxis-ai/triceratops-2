@@ -41,6 +41,11 @@ from triceratops.scenarios.nearby_scenarios import EmptyTrilegalPeerPopulationEr
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
 from triceratops.validation.job import PreparedValidationInputs
 
+MOLUSC_CONTRAST_CURVE_WARNING = (
+    "MOLUSC data is assumed to already include follow-up/imaging constraints; "
+    "TRICERATOPS does not apply contrast curves to MOLUSC-backed companion priors."
+)
+
 
 @dataclass
 class ScenarioExecutionContext:
@@ -87,6 +92,15 @@ def _single_contrast_curve_band(
     if len(curves) == 1:
         return curves[0].band
     return None
+
+
+def _molusc_contrast_curve_warning(
+    contrast_curve: ContrastCurveInput,
+    molusc_data: MoluscData | None,
+) -> str | None:
+    if molusc_data is None or not normalize_contrast_curves(contrast_curve):
+        return None
+    return MOLUSC_CONTRAST_CURVE_WARNING
 
 
 def _worker_initializer() -> None:
@@ -259,6 +273,10 @@ class ValidationEngine:
         if config.seed is not None:
             np.random.seed(config.seed)
         contrast_curve = canonicalize_contrast_curve_input(contrast_curve)
+        all_warnings: list[str] = []
+        molusc_warning = _molusc_contrast_curve_warning(contrast_curve, molusc_data)
+        if molusc_warning is not None:
+            all_warnings.append(molusc_warning)
 
         nearby_ids = ScenarioID.nearby_scenarios()
         if scenario_ids is None:
@@ -342,7 +360,6 @@ class ValidationEngine:
             )
 
         all_results: list[ScenarioResult] = []
-        all_warnings: list[str] = []
         if not work_items:
             return self._aggregate(
                 all_results,
