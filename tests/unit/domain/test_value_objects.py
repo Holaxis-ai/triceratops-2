@@ -8,8 +8,11 @@ import pytest
 
 from triceratops.domain.value_objects import (
     ContrastCurve,
+    ContrastCurveSet,
     LimbDarkeningCoeffs,
     StellarParameters,
+    canonicalize_contrast_curve_input,
+    normalize_contrast_curves,
 )
 
 
@@ -79,6 +82,71 @@ class TestContrastCurve:
                 delta_mags=np.array([1.0]),
                 band="K",
             )
+
+
+class TestContrastCurveSet:
+    def test_curve_set_preserves_curves_and_bands(self) -> None:
+        j_curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="J",
+        )
+        k_curve = ContrastCurve(
+            separations_arcsec=np.array([0.2, 1.5]),
+            delta_mags=np.array([3.0, 7.0]),
+            band="K",
+        )
+
+        curve_set = ContrastCurveSet([j_curve, k_curve])
+
+        assert tuple(curve_set) == (j_curve, k_curve)
+        assert len(curve_set) == 2
+        assert curve_set.bands == ("J", "K")
+
+    def test_curve_set_rejects_empty(self) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            ContrastCurveSet([])
+
+    def test_normalize_contrast_curves(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="TESS",
+        )
+        curve_set = ContrastCurveSet([curve])
+
+        assert normalize_contrast_curves(None) == ()
+        assert normalize_contrast_curves(curve) == (curve,)
+        assert normalize_contrast_curves(curve_set) == (curve,)
+        assert normalize_contrast_curves([curve]) == (curve,)
+
+    def test_normalize_contrast_curves_rejects_non_curves(self) -> None:
+        with pytest.raises(TypeError, match="ContrastCurve instances"):
+            normalize_contrast_curves(["not a curve"])  # type: ignore[list-item]
+
+    def test_canonicalize_preserves_concrete_inputs(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="TESS",
+        )
+        curve_set = ContrastCurveSet([curve])
+
+        assert canonicalize_contrast_curve_input(None) is None
+        assert canonicalize_contrast_curve_input(curve) is curve
+        assert canonicalize_contrast_curve_input(curve_set) is curve_set
+
+    def test_canonicalize_materializes_one_shot_iterable(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="K",
+        )
+
+        canonical = canonicalize_contrast_curve_input(curve for curve in [curve])
+
+        assert isinstance(canonical, ContrastCurveSet)
+        assert normalize_contrast_curves(canonical) == (curve,)
 
 
 class TestLimbDarkeningCoeffs:

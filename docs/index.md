@@ -16,3 +16,8 @@ print(f"FPP = {result.fpp:.4f}")
 ## API Reference
 
 See the [API Reference](api/index.md) for full documentation of the public interface.
+
+## Local Review Notes
+
+- [Multiple contrast curves validation report](multiple_contrast_curves_validation.md)
+- [Multiple contrast curves PR review guidance](multiple_contrast_curves_pr_review_guidance.md)

@@ -1,6 +1,7 @@
 """Pure value objects: immutable data types used across the system."""
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 import numpy as np
@@ -126,3 +127,68 @@ class ContrastCurve:
         return float(
             np.interp(separation_arcsec, self.separations_arcsec, self.delta_mags)
         )
+
+
+@dataclass(frozen=True)
+class ContrastCurveSet:
+    """Collection of AO/speckle curves to apply as joint non-detections.
+
+    Multiple curves are interpreted as an intersection of independent radial
+    contrast constraints. Each scenario computes the detectable separation for
+    every curve in that curve's band and uses the smallest allowed separation
+    per Monte Carlo draw.
+    """
+
+    curves: tuple[ContrastCurve, ...] | Iterable[ContrastCurve]
+
+    def __post_init__(self) -> None:
+        curves = tuple(self.curves)
+        if not curves:
+            raise ValueError("ContrastCurveSet requires at least one ContrastCurve")
+        if not all(isinstance(curve, ContrastCurve) for curve in curves):
+            raise TypeError("ContrastCurveSet accepts only ContrastCurve instances")
+        object.__setattr__(self, "curves", curves)
+
+    def __iter__(self) -> Iterator[ContrastCurve]:
+        return iter(self.curves)
+
+    def __len__(self) -> int:
+        return len(self.curves)
+
+    @property
+    def bands(self) -> tuple[str, ...]:
+        """Band labels for all curves, preserving input order."""
+        return tuple(curve.band for curve in self.curves)
+
+
+ContrastCurveInput = ContrastCurve | ContrastCurveSet | Iterable[ContrastCurve] | None
+"""Accepted contrast-curve input at validation/scenario boundaries."""
+
+
+def canonicalize_contrast_curve_input(
+    contrast_curve: ContrastCurveInput,
+) -> ContrastCurve | ContrastCurveSet | None:
+    """Return a reusable, picklable contrast-curve input object.
+
+    Concrete inputs are preserved.  Generic iterables are materialized once so
+    one-shot iterators cannot be consumed by helper introspection before the
+    scenario worker sees them.
+    """
+    if contrast_curve is None:
+        return None
+    if isinstance(contrast_curve, (ContrastCurve, ContrastCurveSet)):
+        return contrast_curve
+    return ContrastCurveSet(contrast_curve)
+
+
+def normalize_contrast_curves(
+    contrast_curve: ContrastCurveInput,
+) -> tuple[ContrastCurve, ...]:
+    """Normalize None, a single curve, or a curve set to a tuple of curves."""
+    if contrast_curve is None:
+        return ()
+    if isinstance(contrast_curve, ContrastCurve):
+        return (contrast_curve,)
+    if isinstance(contrast_curve, ContrastCurveSet):
+        return contrast_curve.curves
+    return ContrastCurveSet(contrast_curve).curves

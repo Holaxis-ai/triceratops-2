@@ -113,9 +113,13 @@ _FLUX_NODES_K = np.array([-4.7, -2.9, -1.7, -0.7, 0.6, 1.6, 3, 3.3, 4, 6]) / 2.5
 # Supported filter names for get_flux_ratio
 _SUPPORTED_FILTERS = frozenset({"TESS", "Vis", "Kepler", "J", "H", "K", "g", "r", "i", "z"})
 _FILTER_ALIASES = {
+    "Jcont": "J",
+    "Hcont": "H",
     "Ks": "K",
     "Kcont": "K",
+    "Brgamma": "K",
     "Kp": "Kepler",
+    "LP600": "Vis",
     "562nm": "Vis",
     "832nm": "Vis",
 }

@@ -28,12 +28,23 @@ from triceratops.domain.entities import (
 from triceratops.domain.molusc import MoluscData
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import ContrastCurve, PeriodSpec, StellarParameters
+from triceratops.domain.value_objects import (
+    ContrastCurveInput,
+    PeriodSpec,
+    StellarParameters,
+    canonicalize_contrast_curve_input,
+    normalize_contrast_curves,
+)
 from triceratops.population.protocols import TRILEGALResult
 from triceratops.scenarios.base import Scenario
 from triceratops.scenarios.nearby_scenarios import EmptyTrilegalPeerPopulationError
 from triceratops.scenarios.registry import DEFAULT_REGISTRY, ScenarioRegistry
 from triceratops.validation.job import PreparedValidationInputs
+
+MOLUSC_CONTRAST_CURVE_WARNING = (
+    "MOLUSC data is assumed to already include follow-up/imaging constraints; "
+    "TRICERATOPS does not apply contrast curves to MOLUSC-backed companion priors."
+)
 
 
 @dataclass
@@ -51,7 +62,7 @@ class ScenarioExecutionContext:
     config: Config
     external_lcs: list[ExternalLightCurve] = field(default_factory=list)
     # Scenario-specific kwargs (kept as dict for backward compat with **kwargs pattern)
-    contrast_curve: ContrastCurve | None = None
+    contrast_curve: ContrastCurveInput = None
     trilegal_population: TRILEGALResult | None = None
     host_magnitudes: dict = field(default_factory=dict)
     target_tmag: float | None = None
@@ -71,6 +82,25 @@ class ScenarioExecutionOutcome:
 
 
 WorkItem = ScenarioExecutionContext | ScenarioExecutionOutcome
+
+
+def _single_contrast_curve_band(
+    contrast_curve: ContrastCurveInput,
+) -> str | None:
+    """Return a band only when exactly one curve is active."""
+    curves = normalize_contrast_curves(contrast_curve)
+    if len(curves) == 1:
+        return curves[0].band
+    return None
+
+
+def _molusc_contrast_curve_warning(
+    contrast_curve: ContrastCurveInput,
+    molusc_data: MoluscData | None,
+) -> str | None:
+    if molusc_data is None or not normalize_contrast_curves(contrast_curve):
+        return None
+    return MOLUSC_CONTRAST_CURVE_WARNING
 
 
 def _worker_initializer() -> None:
@@ -218,7 +248,7 @@ class ValidationEngine:
         config: Config,
         scenario_ids: Sequence[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
-        contrast_curve: ContrastCurve | None = None,
+        contrast_curve: ContrastCurveInput = None,
         molusc_data: MoluscData | None = None,
         trilegal_population: TRILEGALResult | None = None,
     ) -> ValidationResult:
@@ -242,6 +272,11 @@ class ValidationEngine:
         """
         if config.seed is not None:
             np.random.seed(config.seed)
+        contrast_curve = canonicalize_contrast_curve_input(contrast_curve)
+        all_warnings: list[str] = []
+        molusc_warning = _molusc_contrast_curve_warning(contrast_curve, molusc_data)
+        if molusc_warning is not None:
+            all_warnings.append(molusc_warning)
 
         nearby_ids = ScenarioID.nearby_scenarios()
         if scenario_ids is None:
@@ -275,7 +310,7 @@ class ValidationEngine:
                 "Check the catalog query result or set stellar_params manually."
             )
 
-        filt = contrast_curve.band if contrast_curve is not None else None
+        filt = _single_contrast_curve_band(contrast_curve)
         shared_kwargs: dict = {
             "target_id": stellar_field.target_id,
             "contrast_curve": contrast_curve,
@@ -325,7 +360,6 @@ class ValidationEngine:
             )
 
         all_results: list[ScenarioResult] = []
-        all_warnings: list[str] = []
         if not work_items:
             return self._aggregate(
                 all_results,
@@ -516,14 +550,14 @@ class ValidationEngine:
         period_days: PeriodSpec,
         config: Config,
         external_lcs: list[ExternalLightCurve] | None,
-        contrast_curve: ContrastCurve | None,
+        contrast_curve: ContrastCurveInput,
         molusc_data: MoluscData | None,
         trilegal_population: TRILEGALResult | None,
     ) -> list[ScenarioExecutionContext]:
         if scenario_id not in ScenarioID.nearby_scenarios():
             return []
 
-        filt = contrast_curve.band if contrast_curve is not None else None
+        filt = _single_contrast_curve_band(contrast_curve)
         nearby_tasks: list[ScenarioExecutionContext] = []
         scenario, result_scenario_ids = self._resolve_nearby_execution(
             scenario_id,

@@ -10,9 +10,18 @@ from triceratops.config.config import Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve
 from triceratops.domain.result import ScenarioResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import LimbDarkeningCoeffs, StellarParameters
+from triceratops.domain.value_objects import (
+    ContrastCurve,
+    ContrastCurveSet,
+    LimbDarkeningCoeffs,
+    StellarParameters,
+)
 from triceratops.limb_darkening.catalog import FixedLDCCatalog
 from triceratops.population.protocols import TRILEGALResult
+from triceratops.priors.lnpriors import (
+    lnprior_background,
+    lnprior_background_from_separations,
+)
 from triceratops.priors.sampling import (
     sample_arg_periastron,
     sample_companion_mass_ratio,
@@ -29,6 +38,13 @@ from triceratops.scenarios.background_scenarios import (
 )
 
 _LNL_MOD = "triceratops.scenarios.background_scenarios"
+
+
+def _fluxratio_pair_for_combined_delta(delta_mag: float) -> tuple[np.ndarray, np.ndarray]:
+    half_brightness_ratio = 10 ** (delta_mag / 2.5) / 2
+    flux_ratio = half_brightness_ratio / (1 + half_brightness_ratio)
+    value = np.array([flux_ratio])
+    return value, value
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +330,240 @@ class TestBrightBackgroundParity:
         expected[delta_mags > 0.0] = -np.inf
 
         np.testing.assert_array_equal(lnprior, expected)
+
+    def test_beb_prior_curve_set_uses_tightest_curve_per_draw(self) -> None:
+        idxs = np.array([0, 1])
+        fluxratios_comp = np.array([0.10, 0.15])
+        fluxratios_eb = np.array([0.05, 0.10])
+        loose = ContrastCurve(
+            separations_arcsec=np.array([0.2, 1.0, 2.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        tight = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+
+        lnprior = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            fluxratios_comp,
+            fluxratios_eb,
+            ContrastCurveSet([loose, tight]),
+            band_fluxratio_resolver=lambda _band: (fluxratios_comp, fluxratios_eb),
+        )
+
+        delta_mags = 2.5 * np.log10(
+            (fluxratios_comp / (1 - fluxratios_comp))
+            + (fluxratios_eb / (1 - fluxratios_eb))
+        )
+        expected = lnprior_background(
+            50,
+            np.abs(delta_mags),
+            tight.separations_arcsec,
+            tight.delta_mags,
+        )
+        expected[expected > 0.0] = 0.0
+        expected[delta_mags > 0.0] = -np.inf
+
+        np.testing.assert_allclose(lnprior, expected)
+
+    def test_curve_requires_band_fluxratio_resolver(self) -> None:
+        idxs = np.array([0, 1])
+        fluxratios_comp = np.array([0.10, 0.15])
+        fluxratios_eb = np.array([0.05, 0.10])
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+
+        with pytest.raises(ValueError, match="band_fluxratio_resolver"):
+            _compute_bright_background_lnprior(
+                50,
+                idxs,
+                fluxratios_comp,
+                fluxratios_eb,
+                curve,
+            )
+
+    def test_blind_curve_does_not_override_visible_curve(self) -> None:
+        idxs = np.array([0])
+        vis_comp, vis_eb = _fluxratio_pair_for_combined_delta(-10.0)
+        k_comp, k_eb = _fluxratio_pair_for_combined_delta(-8.8)
+        shallow_blind = ContrastCurve(
+            separations_arcsec=np.array([0.01, 0.1, 0.5, 1.17]),
+            delta_mags=np.array([0.0, 4.0, 5.5, 5.9]),
+            band="Vis",
+        )
+        k_visible = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0, 5.0, 10.0]),
+            delta_mags=np.array([2.0, 6.0, 7.5, 8.7, 9.0]),
+            band="K",
+        )
+
+        def resolver(band: str) -> tuple[np.ndarray, np.ndarray]:
+            if band == "K":
+                return k_comp, k_eb
+            return vis_comp, vis_eb
+
+        lnprior = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            vis_comp,
+            vis_eb,
+            ContrastCurveSet([shallow_blind, k_visible]),
+            band_fluxratio_resolver=resolver,
+        )
+
+        expected_sep = np.interp(
+            8.8,
+            k_visible.delta_mags,
+            k_visible.separations_arcsec,
+        )
+        expected = lnprior_background_from_separations(
+            50,
+            np.array([expected_sep]),
+        )
+        expected[expected > 0.0] = 0.0
+
+        np.testing.assert_allclose(lnprior, expected)
+
+    def test_all_blind_curve_set_falls_back_to_largest_owa(self) -> None:
+        idxs = np.array([0])
+        vis_comp, vis_eb = _fluxratio_pair_for_combined_delta(-10.0)
+        k_comp, k_eb = _fluxratio_pair_for_combined_delta(-10.0)
+        narrow = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.17]),
+            delta_mags=np.array([1.0, 5.0]),
+            band="Vis",
+        )
+        wide = ContrastCurve(
+            separations_arcsec=np.array([0.1, 9.9]),
+            delta_mags=np.array([1.0, 8.0]),
+            band="K",
+        )
+
+        def resolver(band: str) -> tuple[np.ndarray, np.ndarray]:
+            if band == "K":
+                return k_comp, k_eb
+            return vis_comp, vis_eb
+
+        lnprior = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            vis_comp,
+            vis_eb,
+            ContrastCurveSet([narrow, wide]),
+            band_fluxratio_resolver=resolver,
+        )
+
+        expected = lnprior_background_from_separations(50, np.array([9.9]))
+        expected[expected > 0.0] = 0.0
+
+        np.testing.assert_allclose(lnprior, expected)
+
+    def test_curve_set_is_idempotent(self) -> None:
+        idxs = np.array([0])
+        fluxratios_comp, fluxratios_eb = _fluxratio_pair_for_combined_delta(-4.0)
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+
+        single = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            fluxratios_comp,
+            fluxratios_eb,
+            curve,
+            band_fluxratio_resolver=lambda _band: (fluxratios_comp, fluxratios_eb),
+        )
+        duplicate_set = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            fluxratios_comp,
+            fluxratios_eb,
+            ContrastCurveSet([curve, curve]),
+            band_fluxratio_resolver=lambda _band: (fluxratios_comp, fluxratios_eb),
+        )
+
+        np.testing.assert_array_equal(duplicate_set, single)
+
+    def test_weaker_curve_does_not_change_stronger_curve(self) -> None:
+        idxs = np.array([0])
+        fluxratios_comp, fluxratios_eb = _fluxratio_pair_for_combined_delta(-4.0)
+        strong = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        weak = ContrastCurve(
+            separations_arcsec=np.array([0.2, 0.7, 1.4]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+
+        single = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            fluxratios_comp,
+            fluxratios_eb,
+            strong,
+            band_fluxratio_resolver=lambda _band: (fluxratios_comp, fluxratios_eb),
+        )
+        with_weaker = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            fluxratios_comp,
+            fluxratios_eb,
+            ContrastCurveSet([strong, weak]),
+            band_fluxratio_resolver=lambda _band: (fluxratios_comp, fluxratios_eb),
+        )
+
+        np.testing.assert_array_equal(with_weaker, single)
+
+    def test_curve_set_is_permutation_invariant(self) -> None:
+        idxs = np.array([0])
+        vis_comp, vis_eb = _fluxratio_pair_for_combined_delta(-4.8)
+        k_comp, k_eb = _fluxratio_pair_for_combined_delta(-7.2)
+        vis_curve = ContrastCurve(
+            separations_arcsec=np.array([0.01, 0.1, 0.5, 1.17]),
+            delta_mags=np.array([0.0, 4.0, 5.5, 5.9]),
+            band="Vis",
+        )
+        k_curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0, 5.0, 10.0]),
+            delta_mags=np.array([2.0, 6.0, 7.5, 8.7, 9.0]),
+            band="K",
+        )
+
+        def resolver(band: str) -> tuple[np.ndarray, np.ndarray]:
+            if band == "K":
+                return k_comp, k_eb
+            return vis_comp, vis_eb
+
+        first = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            vis_comp,
+            vis_eb,
+            ContrastCurveSet([vis_curve, k_curve]),
+            band_fluxratio_resolver=resolver,
+        )
+        second = _compute_bright_background_lnprior(
+            50,
+            idxs,
+            vis_comp,
+            vis_eb,
+            ContrastCurveSet([k_curve, vis_curve]),
+            band_fluxratio_resolver=resolver,
+        )
+
+        np.testing.assert_array_equal(second, first)
 
     def test_lookup_background_ldc_bulk_uses_slice_then_metallicity(self) -> None:
         class SparseCatalog:
@@ -604,6 +854,36 @@ class TestBEBCompute:
         )
         assert isinstance(result, tuple)
         assert len(result) == 2
+
+    @patch(f"{_LNL_MOD}.lnL_eb_twin_p", side_effect=_mock_lnL_eb_twin_p)
+    @patch(f"{_LNL_MOD}.lnL_eb_p", side_effect=_mock_lnL_eb_p)
+    def test_single_curve_beb_lnZ_matches_base_d657e05(
+        self, _m1, _m2, transit_lc, stellar_params, small_config,
+        mock_population, host_mags,
+    ) -> None:
+        """Pin single-curve BEB evidence against base d657e05."""
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+            band="TESS",
+        )
+        s = BEBScenario(FixedLDCCatalog())
+
+        np.random.seed(123)
+        result = s.compute(
+            transit_lc,
+            stellar_params,
+            5.0,
+            small_config,
+            trilegal_population=mock_population,
+            host_magnitudes=host_mags,
+            contrast_curve=curve,
+        )
+
+        assert isinstance(result, tuple)
+        primary, twin = result
+        assert primary.ln_evidence == float.fromhex("-0x1.14f3d4af6c11ep+3")
+        assert twin.ln_evidence == float.fromhex("-0x1.51bd013603988p+3")
 
     @patch(f"{_LNL_MOD}.lnL_eb_twin_p", side_effect=_mock_lnL_eb_twin_p)
     @patch(f"{_LNL_MOD}.lnL_eb_p", side_effect=_mock_lnL_eb_p)

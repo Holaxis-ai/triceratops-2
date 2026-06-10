@@ -12,7 +12,13 @@ from __future__ import annotations
 import numpy as np
 
 from triceratops.domain.molusc import MoluscData
-from triceratops.priors.lnpriors import lnprior_bound_companion
+from triceratops.domain.value_objects import normalize_contrast_curves
+from triceratops.priors.lnpriors import (
+    combine_allowed_separations,
+    lnprior_bound_companion,
+    lnprior_bound_companion_from_separations,
+    separation_at_contrast_or_inf_if_blind,
+)
 from triceratops.scenarios.constants import (
     COMPANION_DEFAULT_SEP_ARCSEC,
     LN2PI,
@@ -24,6 +30,10 @@ _relations = StellarRelations()
 # Re-exported so companion_scenarios.py can import _ln2pi from this module
 # without an import cycle.
 _ln2pi = LN2PI
+
+
+def _max_curve_owa_arcsec(curves: tuple) -> float:
+    return max(float(np.max(curve.separations_arcsec)) for curve in curves)
 
 
 def _load_molusc_qs(
@@ -102,7 +112,9 @@ def _compute_companion_prior(
     if molusc_data is not None:
         return np.zeros(n)
 
-    if contrast_curve is None:
+    curves = normalize_contrast_curves(contrast_curve)
+
+    if not curves:
         # No contrast curve: use default wide separations
         # Source: line 805-808 (PTP), 1076-1084 (PEB)
         delta_mags = 2.5 * np.log10(fluxratios_comp / (1 - fluxratios_comp))
@@ -117,24 +129,49 @@ def _compute_companion_prior(
         lnprior_comp[lnprior_comp > 0.0] = 0.0
         lnprior_comp[delta_mags > 0.0] = -np.inf
         return lnprior_comp
-    else:
-        # With contrast curve: compute flux ratio in contrast curve filter
+
+    allowed_separations = []
+    bright_mask = np.zeros(n, dtype=bool)
+    for curve in curves:
+        # With contrast curve: compute flux ratio in contrast curve filter.
         # Source: line 810-815 (PTP), 1087-1102 (PEB)
-        flux_comp_cc = _relations.get_flux_ratio(masses_comp, filt)
-        flux_primary_cc = _relations.get_flux_ratio(np.array([M_s]), filt)
+        flux_comp_cc = _relations.get_flux_ratio(masses_comp, curve.band)
+        flux_primary_cc = _relations.get_flux_ratio(np.array([M_s]), curve.band)
         fluxratios_comp_cc = flux_comp_cc / (flux_comp_cc + flux_primary_cc)
         delta_mags = 2.5 * np.log10(fluxratios_comp_cc / (1 - fluxratios_comp_cc))
+        allowed_separations.append(
+            separation_at_contrast_or_inf_if_blind(
+                np.abs(delta_mags),
+                curve.separations_arcsec,
+                curve.delta_mags,
+            )
+        )
+        bright_mask |= delta_mags > 0.0
+
+    if len(curves) == 1:
+        curve = curves[0]
         lnprior_comp = lnprior_bound_companion(
             delta_mags=np.abs(delta_mags),
-            separations_arcsec=contrast_curve.separations_arcsec,  # type: ignore[union-attr]
-            contrasts=contrast_curve.delta_mags,  # type: ignore[union-attr]
+            separations_arcsec=curve.separations_arcsec,
+            contrasts=curve.delta_mags,
             primary_mass_msun=M_s,
             parallax_mas=plx,
             is_eb=is_eb,
         )
-        lnprior_comp[lnprior_comp > 0.0] = 0.0
-        lnprior_comp[delta_mags > 0.0] = -np.inf
-        return lnprior_comp
+    else:
+        combined_separations = combine_allowed_separations(
+            allowed_separations,
+            all_blind_fallback_arcsec=_max_curve_owa_arcsec(curves),
+        )
+        lnprior_comp = lnprior_bound_companion_from_separations(
+            primary_mass_msun=M_s,
+            parallax_mas=plx,
+            separations_arcsec=combined_separations,
+            is_eb=is_eb,
+        )
+    lnprior_comp[lnprior_comp > 0.0] = 0.0
+    lnprior_comp[bright_mask] = -np.inf
+    return lnprior_comp
 
 
 def _flux_ratio_in_band(
@@ -183,7 +220,9 @@ def _compute_seb_companion_prior(
     if molusc_data is not None:
         return np.zeros(n)
 
-    if contrast_curve is None:
+    curves = normalize_contrast_curves(contrast_curve)
+
+    if not curves:
         delta_mags = 2.5 * np.log10(
             fluxratios_comp / (1 - fluxratios_comp)
             + fluxratios_eb / (1 - fluxratios_eb)
@@ -199,27 +238,52 @@ def _compute_seb_companion_prior(
         lnprior_comp[lnprior_comp > 0.0] = 0.0
         lnprior_comp[delta_mags > 0.0] = -np.inf
         return lnprior_comp
-    else:
-        # With contrast curve: recompute flux ratios in CC filter
-        flux_comp_cc = _relations.get_flux_ratio(masses_comp, filt)
-        flux_primary_cc = _relations.get_flux_ratio(np.array([M_s]), filt)
+
+    allowed_separations = []
+    bright_mask = np.zeros(n, dtype=bool)
+    for curve in curves:
+        # With contrast curve: recompute flux ratios in CC filter.
+        flux_comp_cc = _relations.get_flux_ratio(masses_comp, curve.band)
+        flux_primary_cc = _relations.get_flux_ratio(np.array([M_s]), curve.band)
         fluxratios_comp_cc = flux_comp_cc / (flux_comp_cc + flux_primary_cc)
 
-        flux_eb_cc = _relations.get_flux_ratio(masses_eb, filt)
+        flux_eb_cc = _relations.get_flux_ratio(masses_eb, curve.band)
         fluxratios_eb_cc = flux_eb_cc / (flux_eb_cc + flux_primary_cc)
 
         delta_mags = 2.5 * np.log10(
             fluxratios_comp_cc / (1 - fluxratios_comp_cc)
             + fluxratios_eb_cc / (1 - fluxratios_eb_cc)
         )
+        allowed_separations.append(
+            separation_at_contrast_or_inf_if_blind(
+                np.abs(delta_mags),
+                curve.separations_arcsec,
+                curve.delta_mags,
+            )
+        )
+        bright_mask |= delta_mags > 0.0
+
+    if len(curves) == 1:
+        curve = curves[0]
         lnprior_comp = lnprior_bound_companion(
             delta_mags=np.abs(delta_mags),
-            separations_arcsec=contrast_curve.separations_arcsec,  # type: ignore[union-attr]
-            contrasts=contrast_curve.delta_mags,  # type: ignore[union-attr]
+            separations_arcsec=curve.separations_arcsec,
+            contrasts=curve.delta_mags,
             primary_mass_msun=M_s,
             parallax_mas=plx,
             is_eb=True,
         )
-        lnprior_comp[lnprior_comp > 0.0] = 0.0
-        lnprior_comp[delta_mags > 0.0] = -np.inf
-        return lnprior_comp
+    else:
+        combined_separations = combine_allowed_separations(
+            allowed_separations,
+            all_blind_fallback_arcsec=_max_curve_owa_arcsec(curves),
+        )
+        lnprior_comp = lnprior_bound_companion_from_separations(
+            primary_mass_msun=M_s,
+            parallax_mas=plx,
+            separations_arcsec=combined_separations,
+            is_eb=True,
+        )
+    lnprior_comp[lnprior_comp > 0.0] = 0.0
+    lnprior_comp[bright_mask] = -np.inf
+    return lnprior_comp

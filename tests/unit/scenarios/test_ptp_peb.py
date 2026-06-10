@@ -10,13 +10,21 @@ from triceratops.config.config import CONST, Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve
 from triceratops.domain.result import ScenarioResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import LimbDarkeningCoeffs, StellarParameters
+from triceratops.domain.value_objects import (
+    ContrastCurve,
+    ContrastCurveSet,
+    LimbDarkeningCoeffs,
+    StellarParameters,
+)
 from triceratops.limb_darkening.catalog import FixedLDCCatalog
+from triceratops.priors.lnpriors import lnprior_bound_companion_from_separations
 from triceratops.scenarios.companion_scenarios import (
     PEBScenario,
     PTPScenario,
+    _companion_flux_filter,
     _compute_companion_prior,
     _compute_companion_properties,
+    _compute_seb_companion_prior,
     _load_molusc_qs,
 )
 
@@ -31,6 +39,25 @@ _skip_no_pytransit = pytest.mark.skipif(
 )
 
 _LNL_MOD = "triceratops.scenarios.companion_scenarios"
+
+
+def _fluxratios_for_masses(
+    masses: np.ndarray,
+    band: str = "TESS",
+    primary_mass: float = 1.0,
+) -> np.ndarray:
+    from triceratops.stellar.relations import StellarRelations
+
+    sr = StellarRelations()
+    flux_comp = sr.get_flux_ratio(masses, band)
+    flux_primary = sr.get_flux_ratio(np.array([primary_mass]), band)
+    return flux_comp / (flux_comp + flux_primary)
+
+
+def test_companion_flux_filter_defaults_none_to_tess():
+    assert _companion_flux_filter({}) == "TESS"
+    assert _companion_flux_filter({"filt": None}) == "TESS"
+    assert _companion_flux_filter({"filt": "K"}) == "K"
 
 
 class _RecordingCatalog:
@@ -401,6 +428,524 @@ def test_compute_companion_prior_with_contrast_curve():
         contrast_curve=cc, filt="J", is_eb=True,
     )
     assert prior.shape == (n,)
+
+
+def test_compute_companion_prior_curve_set_single_matches_single_curve():
+    """A one-curve set preserves the previous single-curve prior."""
+    from triceratops.domain.value_objects import ContrastCurve, ContrastCurveSet
+
+    cc = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    from triceratops.stellar.relations import StellarRelations
+    sr = StellarRelations()
+    flux_comp = sr.get_flux_ratio(masses, "TESS")
+    flux_primary = sr.get_flux_ratio(np.array([1.0]), "TESS")
+    fluxratios = flux_comp / (flux_comp + flux_primary)
+
+    single = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=cc, filt="TESS", is_eb=False,
+    )
+    as_set = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([cc]), filt="TESS", is_eb=False,
+    )
+
+    np.testing.assert_array_equal(as_set, single)
+
+
+def test_compute_companion_prior_curve_set_uses_tightest_curve_per_draw():
+    """Multiple curves combine by the smallest allowed separation per draw."""
+    from triceratops.domain.value_objects import ContrastCurve, ContrastCurveSet
+
+    loose = ContrastCurve(
+        separations_arcsec=np.array([0.2, 1.0, 2.0, 4.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    tight = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    from triceratops.stellar.relations import StellarRelations
+    sr = StellarRelations()
+    flux_comp = sr.get_flux_ratio(masses, "TESS")
+    flux_primary = sr.get_flux_ratio(np.array([1.0]), "TESS")
+    fluxratios = flux_comp / (flux_comp + flux_primary)
+
+    expected = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=tight, filt="TESS", is_eb=False,
+    )
+    multi = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([loose, tight]), filt="TESS", is_eb=False,
+    )
+
+    np.testing.assert_array_equal(multi, expected)
+
+
+def test_compute_companion_prior_curve_set_is_idempotent():
+    curve = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    fluxratios = _fluxratios_for_masses(masses)
+
+    single = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=curve,
+        filt="TESS",
+        is_eb=False,
+    )
+    duplicate_set = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([curve, curve]),
+        filt="TESS",
+        is_eb=False,
+    )
+
+    np.testing.assert_array_equal(duplicate_set, single)
+
+
+def test_compute_companion_prior_weaker_curve_does_not_change_stronger_curve():
+    strong = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    weak = ContrastCurve(
+        separations_arcsec=np.array([0.2, 0.8, 1.6, 3.2]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    fluxratios = _fluxratios_for_masses(masses)
+
+    single = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=strong,
+        filt="TESS",
+        is_eb=False,
+    )
+    with_weaker = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([strong, weak]),
+        filt="TESS",
+        is_eb=False,
+    )
+
+    np.testing.assert_array_equal(with_weaker, single)
+
+
+def test_compute_companion_prior_curve_set_is_permutation_invariant():
+    vis_curve = ContrastCurve(
+        separations_arcsec=np.array([0.01, 0.1, 0.5, 1.17]),
+        delta_mags=np.array([0.0, 4.0, 5.5, 5.9]),
+        band="Vis",
+    )
+    k_curve = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 5.0, 10.0]),
+        delta_mags=np.array([2.0, 6.0, 7.5, 8.7, 9.0]),
+        band="K",
+    )
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    fluxratios = _fluxratios_for_masses(masses)
+
+    first = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([vis_curve, k_curve]),
+        filt="TESS",
+        is_eb=False,
+    )
+    second = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([k_curve, vis_curve]),
+        filt="TESS",
+        is_eb=False,
+    )
+
+    np.testing.assert_array_equal(second, first)
+
+
+def test_compute_companion_prior_blind_curve_does_not_override_visible_curve():
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    from triceratops.stellar.relations import StellarRelations
+    sr = StellarRelations()
+    flux_comp = sr.get_flux_ratio(masses, "TESS")
+    flux_primary = sr.get_flux_ratio(np.array([1.0]), "TESS")
+    fluxratios = flux_comp / (flux_comp + flux_primary)
+    delta_mags = np.abs(2.5 * np.log10(fluxratios / (1 - fluxratios)))
+    blind_depth = float(np.min(delta_mags) / 2)
+    visible_depth = float(np.max(delta_mags) + 1.0)
+    blind = ContrastCurve(
+        separations_arcsec=np.array([0.1, 1.17]),
+        delta_mags=np.array([0.0, blind_depth]),
+        band="TESS",
+    )
+    visible = ContrastCurve(
+        separations_arcsec=np.array([0.2, 4.0]),
+        delta_mags=np.array([0.0, visible_depth]),
+        band="TESS",
+    )
+
+    expected = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=visible, filt="TESS", is_eb=False,
+    )
+    multi = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([blind, visible]),
+        filt="TESS",
+        is_eb=False,
+    )
+
+    np.testing.assert_array_equal(multi, expected)
+
+
+def test_compute_companion_prior_all_blind_falls_back_to_largest_owa():
+    n = 25
+    masses = np.linspace(0.2, 0.9, n)
+    from triceratops.stellar.relations import StellarRelations
+    sr = StellarRelations()
+    flux_comp = sr.get_flux_ratio(masses, "TESS")
+    flux_primary = sr.get_flux_ratio(np.array([1.0]), "TESS")
+    fluxratios = flux_comp / (flux_comp + flux_primary)
+    delta_mags = np.abs(2.5 * np.log10(fluxratios / (1 - fluxratios)))
+    blind_depth = float(np.min(delta_mags) / 2)
+    narrow = ContrastCurve(
+        separations_arcsec=np.array([0.1, 1.17]),
+        delta_mags=np.array([0.0, blind_depth]),
+        band="TESS",
+    )
+    wide = ContrastCurve(
+        separations_arcsec=np.array([0.2, 9.9]),
+        delta_mags=np.array([0.0, blind_depth]),
+        band="TESS",
+    )
+
+    multi = _compute_companion_prior(
+        masses_comp=masses,
+        fluxratios_comp=fluxratios,
+        M_s=1.0, plx=10.0, n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([narrow, wide]),
+        filt="TESS",
+        is_eb=False,
+    )
+
+    expected = lnprior_bound_companion_from_separations(
+        primary_mass_msun=1.0,
+        parallax_mas=10.0,
+        separations_arcsec=np.full(n, 9.9),
+        is_eb=False,
+    )
+    expected[expected > 0.0] = 0.0
+
+    np.testing.assert_allclose(multi, expected)
+
+
+def test_compute_seb_companion_prior_blind_curve_does_not_override_visible_curve():
+    n = 25
+    masses_comp = np.linspace(0.2, 0.7, n)
+    masses_eb = np.linspace(0.15, 0.5, n)
+    from triceratops.stellar.relations import StellarRelations
+    sr = StellarRelations()
+    flux_primary = sr.get_flux_ratio(np.array([1.0]), "TESS")
+    flux_comp = sr.get_flux_ratio(masses_comp, "TESS")
+    flux_eb = sr.get_flux_ratio(masses_eb, "TESS")
+    fluxratios_comp = flux_comp / (flux_comp + flux_primary)
+    fluxratios_eb = flux_eb / (flux_eb + flux_primary)
+    delta_mags = np.abs(
+        2.5 * np.log10(
+            fluxratios_comp / (1 - fluxratios_comp)
+            + fluxratios_eb / (1 - fluxratios_eb)
+        )
+    )
+    blind_depth = float(np.min(delta_mags) / 2)
+    visible_depth = float(np.max(delta_mags) + 1.0)
+    blind = ContrastCurve(
+        separations_arcsec=np.array([0.1, 1.17]),
+        delta_mags=np.array([0.0, blind_depth]),
+        band="TESS",
+    )
+    visible = ContrastCurve(
+        separations_arcsec=np.array([0.2, 4.0]),
+        delta_mags=np.array([0.0, visible_depth]),
+        band="TESS",
+    )
+
+    expected = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=visible,
+        filt="TESS",
+    )
+    multi = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([blind, visible]),
+        filt="TESS",
+    )
+
+    np.testing.assert_array_equal(multi, expected)
+
+
+def test_compute_seb_companion_prior_curve_set_is_idempotent():
+    curve = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    n = 25
+    masses_comp = np.linspace(0.2, 0.7, n)
+    masses_eb = np.linspace(0.15, 0.5, n)
+    fluxratios_comp = _fluxratios_for_masses(masses_comp)
+    fluxratios_eb = _fluxratios_for_masses(masses_eb)
+
+    single = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=curve,
+        filt="TESS",
+    )
+    duplicate_set = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([curve, curve]),
+        filt="TESS",
+    )
+
+    np.testing.assert_array_equal(duplicate_set, single)
+
+
+def test_compute_seb_companion_prior_weaker_curve_does_not_change_stronger_curve():
+    strong = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 2.0]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    weak = ContrastCurve(
+        separations_arcsec=np.array([0.2, 0.8, 1.6, 3.2]),
+        delta_mags=np.array([1.0, 3.0, 5.0, 7.0]),
+        band="TESS",
+    )
+    n = 25
+    masses_comp = np.linspace(0.2, 0.7, n)
+    masses_eb = np.linspace(0.15, 0.5, n)
+    fluxratios_comp = _fluxratios_for_masses(masses_comp)
+    fluxratios_eb = _fluxratios_for_masses(masses_eb)
+
+    single = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=strong,
+        filt="TESS",
+    )
+    with_weaker = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([strong, weak]),
+        filt="TESS",
+    )
+
+    np.testing.assert_array_equal(with_weaker, single)
+
+
+def test_compute_seb_companion_prior_curve_set_is_permutation_invariant():
+    vis_curve = ContrastCurve(
+        separations_arcsec=np.array([0.01, 0.1, 0.5, 1.17]),
+        delta_mags=np.array([0.0, 4.0, 5.5, 5.9]),
+        band="Vis",
+    )
+    k_curve = ContrastCurve(
+        separations_arcsec=np.array([0.1, 0.5, 1.0, 5.0, 10.0]),
+        delta_mags=np.array([2.0, 6.0, 7.5, 8.7, 9.0]),
+        band="K",
+    )
+    n = 25
+    masses_comp = np.linspace(0.2, 0.7, n)
+    masses_eb = np.linspace(0.15, 0.5, n)
+    fluxratios_comp = _fluxratios_for_masses(masses_comp)
+    fluxratios_eb = _fluxratios_for_masses(masses_eb)
+
+    first = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([vis_curve, k_curve]),
+        filt="TESS",
+    )
+    second = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([k_curve, vis_curve]),
+        filt="TESS",
+    )
+
+    np.testing.assert_array_equal(second, first)
+
+
+def test_compute_seb_companion_prior_all_blind_falls_back_to_largest_owa():
+    n = 25
+    masses_comp = np.linspace(0.2, 0.7, n)
+    masses_eb = np.linspace(0.15, 0.5, n)
+    from triceratops.stellar.relations import StellarRelations
+    sr = StellarRelations()
+    flux_primary = sr.get_flux_ratio(np.array([1.0]), "TESS")
+    flux_comp = sr.get_flux_ratio(masses_comp, "TESS")
+    flux_eb = sr.get_flux_ratio(masses_eb, "TESS")
+    fluxratios_comp = flux_comp / (flux_comp + flux_primary)
+    fluxratios_eb = flux_eb / (flux_eb + flux_primary)
+    delta_mags = np.abs(
+        2.5 * np.log10(
+            fluxratios_comp / (1 - fluxratios_comp)
+            + fluxratios_eb / (1 - fluxratios_eb)
+        )
+    )
+    blind_depth = float(np.min(delta_mags) / 2)
+    narrow = ContrastCurve(
+        separations_arcsec=np.array([0.1, 1.17]),
+        delta_mags=np.array([0.0, blind_depth]),
+        band="TESS",
+    )
+    wide = ContrastCurve(
+        separations_arcsec=np.array([0.2, 9.9]),
+        delta_mags=np.array([0.0, blind_depth]),
+        band="TESS",
+    )
+
+    multi = _compute_seb_companion_prior(
+        masses_comp=masses_comp,
+        fluxratios_comp=fluxratios_comp,
+        masses_eb=masses_eb,
+        fluxratios_eb=fluxratios_eb,
+        M_s=1.0,
+        plx=10.0,
+        n=n,
+        molusc_data=None,
+        contrast_curve=ContrastCurveSet([narrow, wide]),
+        filt="TESS",
+    )
+
+    expected = lnprior_bound_companion_from_separations(
+        primary_mass_msun=1.0,
+        parallax_mas=10.0,
+        separations_arcsec=np.full(n, 9.9),
+        is_eb=True,
+    )
+    expected[expected > 0.0] = 0.0
+
+    np.testing.assert_allclose(multi, expected)
 
 
 # --- Phase-level tests (no pytransit needed) ---

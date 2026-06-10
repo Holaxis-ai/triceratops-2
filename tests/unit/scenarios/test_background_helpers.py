@@ -9,11 +9,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from triceratops.domain.value_objects import ContrastCurve, ContrastCurveSet
 from triceratops.population.protocols import TRILEGALResult
+from triceratops.priors.lnpriors import (
+    lnprior_background,
+    lnprior_background_from_separations,
+)
 from triceratops.scenarios._background_helpers import (
     _combined_delta_mag,
     _compute_fluxratios_comp,
     _compute_lnprior_companion,
+    _delta_mag_key_for_band,
     _filter_population_by_target_tmag,
     _needs_sdss_delta_mags,
     _sample_population_indices,
@@ -178,6 +184,17 @@ class TestNeedsSdssDeltaMags:
         assert _needs_sdss_delta_mags((), filt="g") is True
 
 
+class TestDeltaMagKeyForBand:
+    def test_sdss_band_uses_sdss_delta_mags(self) -> None:
+        assert _delta_mag_key_for_band("g") == "delta_gmags"
+
+    def test_ks_alias_uses_k_delta_mags(self) -> None:
+        assert _delta_mag_key_for_band("Ks") == "delta_Kmags"
+
+    def test_kcont_alias_uses_k_delta_mags(self) -> None:
+        assert _delta_mag_key_for_band("Kcont") == "delta_Kmags"
+
+
 # ---------------------------------------------------------------------------
 # _compute_fluxratios_comp
 # ---------------------------------------------------------------------------
@@ -308,3 +325,285 @@ class TestComputeLnpriorCompanion:
         )
         expected = np.log((25 / 0.1) * (1 / 3600) ** 2 * 2.2**2)
         np.testing.assert_allclose(result, expected)
+
+    def test_curve_set_single_matches_single_curve(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        idxs = np.array([0, 1, 2])
+        fluxratios_comp = np.array([0.1, 0.2, 0.3])
+        delta_mags_map = {"delta_TESSmags": np.array([-1.5, -2.5, -3.5])}
+
+        single = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=curve,
+            filt="TESS",
+            numerical_mode="corrected",
+        )
+        as_set = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([curve]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+
+        np.testing.assert_array_equal(as_set, single)
+
+    def test_curve_set_single_matches_single_curve_for_blind_draws(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        idxs = np.array([0, 1])
+        fluxratios_comp = np.array([0.1, 0.2])
+        delta_mags_map = {"delta_TESSmags": np.array([-6.0, -7.0])}
+
+        single = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=curve,
+            filt="TESS",
+            numerical_mode="corrected",
+        )
+        as_set = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([curve]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+
+        np.testing.assert_array_equal(as_set, single)
+
+    def test_curve_set_uses_tightest_curve_per_draw(self) -> None:
+        loose = ContrastCurve(
+            separations_arcsec=np.array([0.2, 1.0, 2.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        tight = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        idxs = np.array([0, 1, 2])
+        fluxratios_comp = np.array([0.1, 0.2, 0.3])
+        delta_mags_map = {"delta_TESSmags": np.array([-1.5, -2.5, -3.5])}
+
+        result = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([loose, tight]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+        expected = lnprior_background(
+            25,
+            np.abs(delta_mags_map["delta_TESSmags"][idxs]),
+            tight.separations_arcsec,
+            tight.delta_mags,
+            numerical_mode="corrected",
+        )
+        expected[expected > 0.0] = 0.0
+
+        np.testing.assert_allclose(result, expected)
+
+    def test_blind_curve_does_not_override_visible_curve(self) -> None:
+        shallow_blind = ContrastCurve(
+            separations_arcsec=np.array([0.01, 0.1, 0.5, 1.17]),
+            delta_mags=np.array([0.0, 4.0, 5.5, 5.9]),
+            band="Vis",
+        )
+        k_visible = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0, 5.0, 10.0]),
+            delta_mags=np.array([2.0, 6.0, 7.5, 8.7, 9.0]),
+            band="K",
+        )
+        idxs = np.array([0])
+        fluxratios_comp = np.array([0.1])
+        delta_mags_map = {
+            "delta_TESSmags": np.array([-10.0]),
+            "delta_Kmags": np.array([-8.8]),
+        }
+
+        result = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([k_visible, shallow_blind]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+
+        expected_sep = np.interp(
+            8.8,
+            k_visible.delta_mags,
+            k_visible.separations_arcsec,
+        )
+        expected = lnprior_background_from_separations(
+            25,
+            np.array([expected_sep]),
+            numerical_mode="corrected",
+        )
+        expected[expected > 0.0] = 0.0
+
+        np.testing.assert_allclose(result, expected)
+
+    def test_all_blind_curve_set_falls_back_to_largest_owa(self) -> None:
+        narrow = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.17]),
+            delta_mags=np.array([1.0, 5.0]),
+            band="Vis",
+        )
+        wide = ContrastCurve(
+            separations_arcsec=np.array([0.1, 9.9]),
+            delta_mags=np.array([1.0, 8.0]),
+            band="K",
+        )
+        idxs = np.array([0])
+        fluxratios_comp = np.array([0.1])
+        delta_mags_map = {
+            "delta_TESSmags": np.array([-10.0]),
+            "delta_Kmags": np.array([-10.0]),
+        }
+
+        result = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([narrow, wide]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+
+        expected = lnprior_background_from_separations(
+            25,
+            np.array([9.9]),
+            numerical_mode="corrected",
+        )
+        expected[expected > 0.0] = 0.0
+
+        np.testing.assert_allclose(result, expected)
+
+    def test_curve_set_is_idempotent(self) -> None:
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        idxs = np.array([0, 1, 2])
+        fluxratios_comp = np.array([0.1, 0.2, 0.3])
+        delta_mags_map = {"delta_TESSmags": np.array([-1.5, -2.5, -3.5])}
+
+        single = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=curve,
+            filt="TESS",
+            numerical_mode="corrected",
+        )
+        duplicate_set = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([curve, curve]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+
+        np.testing.assert_array_equal(duplicate_set, single)
+
+    def test_weaker_curve_does_not_change_stronger_curve(self) -> None:
+        strong = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        weak = ContrastCurve(
+            separations_arcsec=np.array([0.2, 0.7, 1.0]),
+            delta_mags=np.array([1.0, 3.0, 5.0]),
+            band="TESS",
+        )
+        idxs = np.array([0, 1, 2])
+        fluxratios_comp = np.array([0.1, 0.2, 0.3])
+        delta_mags_map = {"delta_TESSmags": np.array([-1.5, -2.5, -3.5])}
+
+        single = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=strong,
+            filt="TESS",
+            numerical_mode="corrected",
+        )
+        with_weaker = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([strong, weak]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+
+        np.testing.assert_array_equal(with_weaker, single)
+
+    def test_curve_set_is_permutation_invariant(self) -> None:
+        k_curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 0.5, 1.0, 5.0, 10.0]),
+            delta_mags=np.array([2.0, 6.0, 7.5, 8.7, 9.0]),
+            band="K",
+        )
+        vis_curve = ContrastCurve(
+            separations_arcsec=np.array([0.01, 0.1, 0.5, 1.17]),
+            delta_mags=np.array([0.0, 4.0, 5.5, 5.9]),
+            band="Vis",
+        )
+        idxs = np.array([0, 1, 2])
+        fluxratios_comp = np.array([0.1, 0.2, 0.3])
+        delta_mags_map = {
+            "delta_TESSmags": np.array([-3.0, -6.0, -10.0]),
+            "delta_Kmags": np.array([-3.5, -8.8, -10.0]),
+        }
+
+        first = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([k_curve, vis_curve]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+        second = _compute_lnprior_companion(
+            n_comp=25,
+            fluxratios_comp=fluxratios_comp,
+            idxs=idxs,
+            delta_mags_map=delta_mags_map,
+            contrast_curve=ContrastCurveSet([vis_curve, k_curve]),
+            filt=None,
+            numerical_mode="corrected",
+        )
+
+        np.testing.assert_array_equal(second, first)

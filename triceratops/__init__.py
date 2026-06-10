@@ -6,6 +6,7 @@ __version__ = "0.3.0.dev0"
 from triceratops.config.config import Config, MissionConfig
 from triceratops.domain import (
     ContrastCurve,
+    ContrastCurveSet,
     Ephemeris,
     EphemerisResolver,
     ExternalLightCurve,
@@ -34,6 +35,7 @@ __all__ = [
     "__version__",
     "Config",
     "ContrastCurve",
+    "ContrastCurveSet",
     "Ephemeris",
     "EphemerisResolver",
     "ExternalLightCurve",

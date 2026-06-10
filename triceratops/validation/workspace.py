@@ -19,7 +19,7 @@ from triceratops.config.config import Config
 from triceratops.domain.entities import ExternalLightCurve, LightCurve, Star, StellarField
 from triceratops.domain.result import ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import ContrastCurve, PeriodSpec
+from triceratops.domain.value_objects import ContrastCurveInput, PeriodSpec
 from triceratops.population.protocols import PopulationSynthesisProvider
 from triceratops.validation.engine import ValidationEngine
 from triceratops.validation.job import PreparedValidationInputs
@@ -305,7 +305,7 @@ class ValidationWorkspace:
         period_days: PeriodSpec,
         scenario_ids: list[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
-        contrast_curve: ContrastCurve | None = None,
+        contrast_curve: ContrastCurveInput = None,
         molusc_data: MoluscData | None = None,
     ) -> PreparedValidationInputs:
         """Assemble all I/O inputs and validate them for compute.
@@ -392,7 +392,7 @@ class ValidationWorkspace:
         period_days: PeriodSpec,
         scenario_ids: list[ScenarioID] | None = None,
         external_lcs: list[ExternalLightCurve] | None = None,
-        contrast_curve: ContrastCurve | None = None,
+        contrast_curve: ContrastCurveInput = None,
         molusc_data: MoluscData | None = None,
     ) -> ValidationResult:
         """Run validation computation and cache the result.

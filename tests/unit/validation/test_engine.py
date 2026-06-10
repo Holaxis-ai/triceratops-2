@@ -8,9 +8,14 @@ import pytest
 
 from triceratops.config.config import Config
 from triceratops.domain.entities import LightCurve, Star, StellarField
+from triceratops.domain.molusc import MoluscData
 from triceratops.domain.result import ScenarioResult, ValidationResult
 from triceratops.domain.scenario_id import ScenarioID
-from triceratops.domain.value_objects import StellarParameters
+from triceratops.domain.value_objects import (
+    ContrastCurve,
+    ContrastCurveSet,
+    StellarParameters,
+)
 from triceratops.scenarios.registry import ScenarioRegistry
 from triceratops.validation.engine import ValidationEngine
 
@@ -83,6 +88,7 @@ class _RecordingScenario(_FakeScenario):
     """Fake scenario that records the light curve passed by the engine."""
     seen_light_curve: LightCurve | None = None
     seen_target_ids: list[int] | None = None
+    seen_kwargs: dict | None = None
 
     def compute(
         self,
@@ -94,6 +100,7 @@ class _RecordingScenario(_FakeScenario):
         **kwargs: object,
     ) -> ScenarioResult | tuple[ScenarioResult, ScenarioResult]:
         self.seen_light_curve = light_curve  # type: ignore[assignment]
+        self.seen_kwargs = dict(kwargs)
         if self.seen_target_ids is None:
             self.seen_target_ids = []
         target_id = kwargs.get("target_id")
@@ -439,6 +446,77 @@ class TestEngineCompute:
         assert isinstance(vr, ValidationResult)
         assert len(vr.scenario_results) == 1
         assert vr.scenario_results[0].scenario_id == ScenarioID.TP
+
+    def test_compute_materializes_generator_contrast_curve(
+        self, transit_lc, stellar_field, small_config,
+    ) -> None:
+        """One-shot curve iterables are stable before worker dispatch."""
+        tp_result = _make_result(ScenarioID.TP, lnZ=0.0)
+        fake_tp = _RecordingScenario(
+            _scenario_id=ScenarioID.TP,
+            _is_eb=False,
+            _result=tp_result,
+        )
+        registry = ScenarioRegistry()
+        registry.register(fake_tp)
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="K",
+        )
+
+        engine = ValidationEngine(registry=registry)
+        vr = engine._compute(
+            transit_lc,
+            stellar_field,
+            period_days=5.0,
+            config=small_config,
+            contrast_curve=(curve for curve in [curve]),
+        )
+
+        assert isinstance(vr, ValidationResult)
+        assert fake_tp.seen_kwargs is not None
+        seen_curve = fake_tp.seen_kwargs["contrast_curve"]
+        assert isinstance(seen_curve, ContrastCurveSet)
+        assert tuple(seen_curve) == (curve,)
+        assert fake_tp.seen_kwargs["filt"] == "K"
+
+    def test_compute_warns_when_molusc_and_contrast_curve_are_both_supplied(
+        self, transit_lc, stellar_field, small_config,
+    ) -> None:
+        """MOLUSC owns bound companion constraints when provided."""
+        tp_result = _make_result(ScenarioID.TP, lnZ=0.0)
+        fake_tp = _FakeScenario(
+            _scenario_id=ScenarioID.TP,
+            _is_eb=False,
+            _result=tp_result,
+        )
+        registry = ScenarioRegistry()
+        registry.register(fake_tp)
+        curve = ContrastCurve(
+            separations_arcsec=np.array([0.1, 1.0]),
+            delta_mags=np.array([2.0, 6.0]),
+            band="K",
+        )
+        molusc = MoluscData(
+            semi_major_axis_au=np.array([20.0]),
+            eccentricity=np.array([0.0]),
+            mass_ratio=np.array([0.5]),
+        )
+
+        engine = ValidationEngine(registry=registry)
+        result = engine._compute(
+            transit_lc,
+            stellar_field,
+            period_days=5.0,
+            config=small_config,
+            contrast_curve=curve,
+            molusc_data=molusc,
+        )
+
+        assert len(result.warnings) == 1
+        assert "MOLUSC data is assumed to already include" in result.warnings[0]
+        assert "does not apply contrast curves" in result.warnings[0]
 
     def test_compute_handles_eb_tuple_results(
         self, transit_lc, stellar_field, small_config,

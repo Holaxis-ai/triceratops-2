@@ -67,6 +67,11 @@ from triceratops.scenarios.kernels import (
 )
 
 
+def _companion_flux_filter(kwargs: dict) -> str:
+    """Return the baseline companion flux band, defaulting missing/None to TESS."""
+    return str(kwargs.get("filt") or "TESS")
+
+
 class PTPScenario(BaseScenario):
     """Planet on a Physically-Bound Companion star.
 
@@ -360,7 +365,7 @@ class PTPScenario(BaseScenario):
         # Compute companion prior
         molusc_data = kwargs.get("molusc_data")
         contrast_curve = kwargs.get("contrast_curve")
-        filt = str(kwargs.get("filt", "TESS"))
+        filt = _companion_flux_filter(kwargs)
         lnprior_comp = _compute_companion_prior(
             samples["masses_comp"], samples["fluxratios_comp"],
             stellar_params.mass_msun, stellar_params.parallax_mas, N,
@@ -792,7 +797,7 @@ class PEBScenario(BaseScenario):
         # Compute companion prior
         molusc_data = kwargs.get("molusc_data")
         contrast_curve = kwargs.get("contrast_curve")
-        filt = str(kwargs.get("filt", "TESS"))
+        filt = _companion_flux_filter(kwargs)
         lnprior_comp = _compute_companion_prior(
             samples["masses_comp"], samples["fluxratios_comp"],
             stellar_params.mass_msun, stellar_params.parallax_mas, N,
@@ -1162,7 +1167,7 @@ class STPScenario(BaseScenario):
 
         molusc_data = kwargs.get("molusc_data")
         contrast_curve = kwargs.get("contrast_curve")
-        filt = str(kwargs.get("filt", "TESS"))
+        filt = _companion_flux_filter(kwargs)
         lnprior_comp = _compute_companion_prior(
             samples["masses_comp"], samples["fluxratios_comp"],
             stellar_params.mass_msun, stellar_params.parallax_mas, N,
@@ -1590,7 +1595,7 @@ class SEBScenario(BaseScenario):
         # SEB companion prior includes both EB and companion flux (lines 1819-1858)
         molusc_data = kwargs.get("molusc_data")
         contrast_curve = kwargs.get("contrast_curve")
-        filt = str(kwargs.get("filt", "TESS"))
+        filt = _companion_flux_filter(kwargs)
         lnprior_comp = _compute_seb_companion_prior(
             samples["masses_comp"], samples["fluxratios_comp"],
             samples["masses_eb"], samples["fluxratios_eb"],
