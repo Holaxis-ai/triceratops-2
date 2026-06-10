@@ -42,6 +42,9 @@ Generated outputs live under:
 - `seed_paired_impact_local_multicc.csv`: matched-seed deltas for every multi run.
 - `ln_evidence_summary_local_multicc.csv`: per-scenario raw `lnZ` means for
   rerun rows with raw-evidence capture.  Currently this covers TOI-6067.
+- `toi6067_fpp_distribution_interpretation.md`: detailed explanation of the
+  TOI-6067 probability distribution and why DTP suppression does not simply
+  redistribute to TP.
 
 ## Environment
 
